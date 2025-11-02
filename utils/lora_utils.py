@@ -174,14 +174,20 @@ def train_lora(
                 cross_attention_dim=cross_attention_dim, 
                 rank=lora_rank
             )
-        
-        # This is for SDXL SELF-ATTENTION
         else:
-            # ALWAYS use LoRAAttnProcessor. It IS a module and works.
-            lora_attn_processor_class = LoRAAttnProcessor
-            unet_lora_attn_procs[name] = lora_attn_processor_class(
-                rank=lora_rank
-            )
+            if hasattr(F, "scaled_dot_product_attention"):
+                lora_attn_processor_class = LoRAAttnProcessor2_0
+            else:
+                lora_attn_processor_class = LoRAAttnProcessor
+
+            # Initialize with NO arguments
+            processor = lora_attn_processor_class() 
+
+            # Set attributes *after* initialization
+            processor.rank = lora_rank
+            processor.cross_attention_dim = cross_attention_dim
+
+            unet_lora_attn_procs[name] = processor
     
     unet.set_attn_processor(unet_lora_attn_procs)
     
