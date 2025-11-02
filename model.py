@@ -142,7 +142,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         x_next = alpha_prod_t_next**0.5 * pred_x0 + pred_dir
         return x_next, pred_x0
 
-        @torch.no_grad()
+    @torch.no_grad()
     def image2latent(self, image):
         DEVICE = torch.device(
             "cuda") if torch.cuda.is_available() else torch.device("cpu")
