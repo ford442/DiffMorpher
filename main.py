@@ -87,9 +87,9 @@ pipeline.to("cuda")
 
 # We need to explicitly point model_xl.py to the new lora_utils_xl
 # This is a bit of a hack, but simpler than refactoring model_xl.py
-import model_xl
-model_xl.train_lora = utils.lora_utils_xl.train_lora
-model_xl.load_lora = utils.lora_utils_xl.load_lora
+import model
+model.train_lora = utils.lora_utils.train_lora
+model.load_lora = utils.lora_utils.load_lora
 
 images = pipeline(
     img_path_0=args.image_path_0,
