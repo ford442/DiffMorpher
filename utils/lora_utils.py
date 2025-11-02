@@ -102,14 +102,14 @@ def get_add_time_ids(original_size, crops_coords_top_left, target_size, dtype, d
 # --- THIS IS THE FULLY CORRECTED FUNCTION ---
 #
 def train_lora(
-    image, prompt, save_lora_dir, model_path=None, 
-    text_encoder=None, text_encoder_2=None, 
-    tokenizer=None, tokenizer_2=None, 
-    vae=None, unet=None, noise_scheduler=None, 
-    lora_steps=200, lora_lr=2e-4, lora_rank=16, 
+    image, prompt, save_lora_dir, model_path=None,
+    text_encoder=None, text_encoder_2=None,
+    tokenizer=None, tokenizer_2=None,
+    vae=None, unet=None, noise_scheduler=None,
+    lora_steps=200, lora_lr=2e-4, lora_rank=16,
     weight_name=None, safe_serialization=False, progress=tqdm
 ):
-    
+
     accelerator = Accelerator(gradient_accumulation_steps=1)
     set_seed(0)
 
@@ -130,13 +130,13 @@ def train_lora(
         noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    
-    unet_dtype = unet.dtype 
-    
+
+    unet_dtype = unet.dtype
+
     vae.to(device, dtype=unet_dtype)
     text_encoder.to(device)
     text_encoder_2.to(device)
-    unet.to(device, dtype=unet_dtype) 
+    unet.to(device, dtype=unet_dtype)
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
@@ -163,32 +163,41 @@ def train_lora(
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
             unet_lora_attn_procs[name] = lora_attn_processor_class(
-                hidden_size=hidden_size, 
-                cross_attention_dim=cross_attention_dim, 
+                hidden_size=hidden_size,
+                cross_attention_dim=cross_attention_dim,
                 rank=lora_rank
             )
-        
+
         # This is for SDXL SELF-ATTENTION
-        # We FORCE LoRAAttnProcessor (which IS a nn.Module)
+        # We must use LoRAAttnProcessor2_0, which IS a nn.Module.
+        # The original LoRAAttnProcessor is not a nn.Module and causes the TypeError.
         else:
-            lora_attn_processor_class = LoRAAttnProcessor
+            # *** THIS IS THE FIX ***
+            # Before: lora_attn_processor_class = LoRAAttnProcessor
+            lora_attn_processor_class = LoRAAttnProcessor2_0
 
-            processor = lora_attn_processor_class() 
+            # Pass arguments directly to the constructor, just like for the 'AddedKV' processor
+            # Before:
+            #   processor = lora_attn_processor_class()
+            #   processor.rank = lora_rank
+            #   ...
+            #   unet_lora_attn_procs[name] = processor
+            unet_lora_attn_procs[name] = lora_attn_processor_class(
+                hidden_size=hidden_size,
+                cross_attention_dim=cross_attention_dim,
+                rank=lora_rank
+            )
+            # *** END OF FIX ***
 
-            # Set attributes *after* initialization
-            processor.rank = lora_rank
-            processor.cross_attention_dim = cross_attention_dim
-
-            unet_lora_attn_procs[name] = processor
-    
     unet.set_attn_processor(unet_lora_attn_procs)
 
     # --- 2. Correctly gather parameters ---
     # ALL processors are now Modules, so we just wrap them all
+    # This line will no longer fail
     unet_lora_layers = AttnProcsLayers(unet.attn_processors)
-    
+
     # Move the new module to the correct device and dtype
-    unet_lora_layers.to(device, dtype=unet.dtype) 
+    unet_lora_layers.to(device, dtype=unet.dtype)
 
     # Get parameters ONLY from this new module.
     params_to_optimize = list(unet_lora_layers.parameters())
@@ -205,7 +214,7 @@ def train_lora(
         weight_decay=1e-2,
         eps=1e-08,
     )
-    
+
     # --- 4. Create the learning rate scheduler ---
     lr_scheduler = get_scheduler(
         "constant",
@@ -224,18 +233,18 @@ def train_lora(
         prompt_embeds, pooled_prompt_embeds = encode_prompt_xl(
             text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
         )
-    
+
     add_time_ids = get_add_time_ids(
         (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, device=device
     )
-    
+
     bsz = 1 # Assuming batch size of 1 for LoRA training
     added_cond_kwargs = {"text_embeds": pooled_prompt_embeds.repeat(bsz, 1), "time_ids": add_time_ids.repeat(bsz, 1)}
     prompt_embeds = prompt_embeds.repeat(bsz, 1, 1)
 
     if type(image) == np.ndarray:
         image = Image.fromarray(image)
-        
+
     image_transforms = transforms.Compose(
         [
             transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILINEAR),
@@ -246,7 +255,7 @@ def train_lora(
     )
     image = image_transforms(image).to(device)
     image = image.unsqueeze(dim=0)
-    
+
     with torch.no_grad():
         latents_dist = vae.encode(image.to(dtype=unet.dtype)).latent_dist
 
@@ -263,9 +272,9 @@ def train_lora(
         noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
 
         model_pred = unet(
-            noisy_model_input, 
-            timesteps, 
-            prompt_embeds, 
+            noisy_model_input,
+            timesteps,
+            prompt_embeds,
             added_cond_kwargs=added_cond_kwargs
         ).sample
 
@@ -284,7 +293,7 @@ def train_lora(
 
     # --- 8. Save weights ---
     unet_lora_layers = accelerator.unwrap_model(unet_lora_layers)
-    
+
     LoraLoaderMixin.save_lora_weights(
         save_directory=save_lora_dir,
         unet_lora_layers=unet_lora_layers,
