@@ -19,8 +19,6 @@ from utils.model_utils import get_img, slerp, do_replace_attn
 from utils.lora_utils import train_lora, load_lora
 from utils.alpha_scheduler import AlphaScheduler
 
-# StoreProcessor and LoadProcessor are identical to the original model.py
-# (They are model-agnostic as they only manipulate self-attention)
 class StoreProcessor():
     def __init__(self, original_processor, value_dict, name):
         self.original_processor = original_processor
@@ -78,24 +76,22 @@ class LoadProcessor():
         return res
 
 
-# SDXL Change: Inherit from StableDiffusionXLPipeline
 class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
     def __init__(
         self,
         vae: AutoencoderKL,
         text_encoder: CLIPTextModel,
-        text_encoder_2: CLIPTextModelWithProjection, # SDXL Change
+        text_encoder_2: CLIPTextModelWithProjection,
         tokenizer: CLIPTokenizer,
-        tokenizer_2: CLIPTokenizer, # SDXL Change
+        tokenizer_2: CLIPTokenizer,
         unet: UNet2DConditionModel,
         scheduler: KarrasDiffusionSchedulers,
-        safety_checker: StableDiffusionSafetyChecker,
-        feature_extractor: CLIPImageProcessor,
+        safety_checker: StableDiffusionSafetyChecker = None,
+        feature_extractor: CLIPImageProcessor = None,
         image_encoder=None,
-        requires_safety_checker: bool = True,
+        requires_safety_checker: bool = False,
     ):
-        # SDXL Change: Simplified __init__ to pass all components to the SDXL parent
         super().__init__(
             vae=vae,
             text_encoder=text_encoder,
@@ -111,9 +107,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         )
         self.img0_dict = dict()
         self.img1_dict = dict()
-
-    # inv_step, image2latent, latent2image, latent2image_grad, step
-    # are all identical to the original model.py and can be copied over verbatim.
 
     def inv_step(
         self,
