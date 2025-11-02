@@ -40,8 +40,28 @@ from diffusers.utils.import_utils import is_xformers_available
 
 check_min_version("0.17.0") # Keep this, but we are using >=0.25.0
 
-# (import_model_class_from_model_name_or_path is identical)
-# ...
+def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
+    text_encoder_config = PretrainedConfig.from_pretrained(
+        pretrained_model_name_or_path,
+        subfolder="text_encoder",
+        revision=revision,
+    )
+    model_class = text_encoder_config.architectures[0]
+
+    if model_class == "CLIPTextModel":
+        from transformers import CLIPTextModel
+
+        return CLIPTextModel
+    elif model_class == "RobertaSeriesModelWithTransformation":
+        from diffusers.pipelines.alt_diffusion.modeling_roberta_series import RobertaSeriesModelWithTransformation
+
+        return RobertaSeriesModelWithTransformation
+    elif model_class == "T5EncoderModel":
+        from transformers import T5EncoderModel
+
+        return T5EncoderModel
+    else:
+        raise ValueError(f"{model_class} is not supported.")
 
 # SDXL Change: New encode_prompt function for dual encoders
 def encode_prompt_xl(text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt):
