@@ -93,6 +93,18 @@ class LoadProcessor():
 
 
 class DiffMorpherPipeline(StableDiffusionXLPipeline):
+    _components = [
+        "vae",
+        "text_encoder",
+        "tokenizer",
+        "text_encoder_2",
+        "tokenizer_2",
+        "unet",
+        "scheduler",
+        "safety_checker",
+        "feature_extractor",
+        "image_encoder",
+    ]
 
     def __init__(self,
                  vae: AutoencoderKL,
@@ -102,12 +114,14 @@ class DiffMorpherPipeline(StableDiffusionXLPipeline):
                  tokenizer_2: CLIPTokenizer,
                  unet: UNet2DConditionModel,
                  scheduler: KarrasDiffusionSchedulers,
+                 safety_checker: StableDiffusionSafetyChecker = None,
                  feature_extractor: CLIPImageProcessor = None,
                  image_encoder=None,
+                 requires_safety_checker: bool = True,
                  ):
 
         super().__init__(vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, unet, scheduler,
-                         feature_extractor, image_encoder)
+                         safety_checker, feature_extractor, image_encoder, requires_safety_checker)
         self.img0_dict = dict()
         self.img1_dict = dict()
 
