@@ -119,11 +119,10 @@ class DiffMorpherPipeline(StableDiffusionXLPipeline):
                  feature_extractor: CLIPImageProcessor = None,
                  image_encoder=None,
                  requires_safety_checker: bool = True,
-                 **kwargs,
                  ):
 
         super().__init__(vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, unet, scheduler,
-                         safety_checker, feature_extractor, image_encoder, requires_safety_checker, **kwargs)
+                         safety_checker, feature_extractor, image_encoder, requires_safety_checker)
         self.img0_dict = dict()
         self.img1_dict = dict()
 
