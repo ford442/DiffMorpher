@@ -102,8 +102,8 @@ class DiffMorpherPipeline(StableDiffusionXLPipeline):
                  tokenizer_2: CLIPTokenizer,
                  unet: UNet2DConditionModel,
                  scheduler: KarrasDiffusionSchedulers,
-                 safety_checker: StableDiffusionSafetyChecker,
-                 feature_extractor: CLIPImageProcessor,
+                 safety_checker: StableDiffusionSafetyChecker = None,
+                 feature_extractor: CLIPImageProcessor = None,
                  image_encoder=None,
                  requires_safety_checker: bool = True,
                  ):
