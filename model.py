@@ -2,6 +2,7 @@ import os
 from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.attention_processor import AttnProcessor
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
+from diffusers.pipelines.stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
 from diffusers.schedulers import KarrasDiffusionSchedulers
 import torch
 import torch.nn.functional as F
@@ -118,10 +119,11 @@ class DiffMorpherPipeline(StableDiffusionXLPipeline):
                  feature_extractor: CLIPImageProcessor = None,
                  image_encoder=None,
                  requires_safety_checker: bool = True,
+                 **kwargs,
                  ):
 
         super().__init__(vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, unet, scheduler,
-                         safety_checker, feature_extractor, image_encoder, requires_safety_checker)
+                         safety_checker, feature_extractor, image_encoder, requires_safety_checker, **kwargs)
         self.img0_dict = dict()
         self.img1_dict = dict()
 
