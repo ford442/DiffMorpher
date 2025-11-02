@@ -179,10 +179,10 @@ def train_lora(
         else:
             if hasattr(F, "scaled_dot_product_attention"):
                 lora_attn_processor_class = LoRAAttnProcessor2_0
-                processor = lora_attn_processor_class() 
-                processor.rank = lora_rank
-                processor.cross_attention_dim = cross_attention_dim
-                unet_lora_attn_procs[name] = processor
+                processor = lora_attn_processor_class() 
+                processor.rank = lora_rank
+                processor.cross_attention_dim = cross_attention_dim
+                unet_lora_attn_procs[name] = processor
             else:
                 lora_attn_processor_class = LoRAAttnProcessor
                 unet_lora_attn_procs[name] = lora_attn_processor_class(
