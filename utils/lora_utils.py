@@ -172,15 +172,15 @@ def train_lora(
         # We FORCE LoRAAttnProcessor (which IS a nn.Module)
         else:
             lora_attn_processor_class = LoRAAttnProcessor
-            
-            # Initialize with NO arguments
-            processor = lora_attn_processor_class() 
-            
-            # Set attributes *after* initialization
-            processor.rank = lora_rank
-            processor.cross_attention_dim = cross_attention_dim
-            
-            unet_lora_attn_procs[name] = processor
+
+            # Initialize with NO arguments (per diffusers 0.35.2 API)
+            processor = lora_attn_processor_class() 
+
+            # Set attributes *after* initialization
+            processor.rank = lora_rank
+            processor.cross_attention_dim = cross_attention_dim
+
+            unet_lora_attn_procs[name] = processor
     
     unet.set_attn_processor(unet_lora_attn_procs)
 
