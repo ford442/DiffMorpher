@@ -4,6 +4,7 @@ from diffusers.models.attention_processor import AttnProcessor
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from diffusers.pipelines.stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
 from diffusers.schedulers import KarrasDiffusionSchedulers
+from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipeline
 import torch
 import torch.nn.functional as F
 import tqdm
@@ -13,6 +14,8 @@ from PIL import Image
 from torchvision import transforms
 from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
 from diffusers import StableDiffusionXLPipeline
+import diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl
+diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl.StableDiffusionXLWatermarker = StableDiffusionXLWatermarker
 from argparse import ArgumentParser
 import inspect
 
@@ -123,7 +126,6 @@ class DiffMorpherPipeline(StableDiffusionXLPipeline):
 
         super().__init__(vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, unet, scheduler,
                          safety_checker, feature_extractor, image_encoder, requires_safety_checker)
-        self.watermark = None
         self.img0_dict = dict()
         self.img1_dict = dict()
 
