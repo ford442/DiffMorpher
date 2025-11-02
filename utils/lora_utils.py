@@ -163,19 +163,30 @@ def train_lora(
             block_id = int(name[len("down_blocks.")])
             hidden_size = unet.config.block_out_channels[block_id]
         else:
-            # SDXL names might be different, but we'll try this
             hidden_size = unet.config.block_out_channels[0]
-            # raise NotImplementedError("name must start with up_blocks, mid_blocks, or down_blocks")
 
+        # This logic is for SDXL's cross-attention (AttnAddedKVProcessor)
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
-        else:
-            lora_attn_processor_class = (
-                LoRAAttnProcessor2_0 if hasattr(F, "scaled_dot_product_attention") else LoRAAttnProcessor
+            # This class *does* take hidden_size
+            unet_lora_attn_procs[name] = lora_attn_processor_class(
+                hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=lora_rank
             )
-        unet_lora_attn_procs[name] = lora_attn_processor_class(
-            hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=lora_rank
-        )
+
+        # This logic is for standard self-attention (AttnProcessor)
+        else:
+            if hasattr(F, "scaled_dot_product_attention"):
+                lora_attn_processor_class = LoRAAttnProcessor2_0
+                # THIS IS THE FIX: LoRAAttnProcessor2_0 does NOT take hidden_size
+                unet_lora_attn_procs[name] = lora_attn_processor_class(
+                    rank=lora_rank, cross_attention_dim=cross_attention_dim
+                )
+            else:
+                # Fallback LoRAAttnProcessor *does* take hidden_size
+                lora_attn_processor_class = LoRAAttnProcessor
+                unet_lora_attn_procs[name] = lora_attn_processor_class(
+                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=lora_rank
+                )
     unet.set_attn_processor(unet_lora_attn_procs)
     unet_lora_layers = AttnProcsLayers(unet.attn_processors)
 
