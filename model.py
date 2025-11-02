@@ -10,8 +10,8 @@ import numpy as np
 import safetensors
 from PIL import Image
 from torchvision import transforms
-from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer
-from diffusers import StableDiffusionPipeline
+from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
+from diffusers import StableDiffusionXLPipeline
 from argparse import ArgumentParser
 import inspect
 
@@ -92,12 +92,14 @@ class LoadProcessor():
         return res
 
 
-class DiffMorpherPipeline(StableDiffusionPipeline):
+class DiffMorpherPipeline(StableDiffusionXLPipeline):
 
     def __init__(self,
                  vae: AutoencoderKL,
                  text_encoder: CLIPTextModel,
                  tokenizer: CLIPTokenizer,
+                 text_encoder_2: CLIPTextModelWithProjection,
+                 tokenizer_2: CLIPTokenizer,
                  unet: UNet2DConditionModel,
                  scheduler: KarrasDiffusionSchedulers,
                  safety_checker: StableDiffusionSafetyChecker,
@@ -105,14 +107,9 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                  image_encoder=None,
                  requires_safety_checker: bool = True,
                  ):
-        sig = inspect.signature(super().__init__)
-        params = sig.parameters
-        if 'image_encoder' in params:
-            super().__init__(vae, text_encoder, tokenizer, unet, scheduler,
-                             safety_checker, feature_extractor, image_encoder, requires_safety_checker)
-        else:
-            super().__init__(vae, text_encoder, tokenizer, unet, scheduler,
-                             safety_checker, feature_extractor, requires_safety_checker)
+
+        super().__init__(vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, unet, scheduler,
+                         safety_checker, feature_extractor, image_encoder, requires_safety_checker)
         self.img0_dict = dict()
         self.img1_dict = dict()
 
@@ -142,90 +139,23 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
         return x_next, pred_x0
 
     @torch.no_grad()
-    def invert(
-            self,
-            image: torch.Tensor,
-            prompt,
-            num_inference_steps=50,
-            num_actual_inference_steps=None,
-            guidance_scale=1.,
-            eta=0.0,
-            **kwds):
-        """
-        invert a real image into noise map with determinisc DDIM inversion
-        """
-        DEVICE = torch.device(
-            "cuda") if torch.cuda.is_available() else torch.device("cpu")
-        batch_size = image.shape[0]
-        if isinstance(prompt, list):
-            if batch_size == 1:
-                image = image.expand(len(prompt), -1, -1, -1)
-        elif isinstance(prompt, str):
-            if batch_size > 1:
-                prompt = [prompt] * batch_size
-
-        # text embeddings
-        text_input = self.tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=77,
-            return_tensors="pt"
-        )
-        text_embeddings = self.text_encoder(text_input.input_ids.to(DEVICE))[0]
-        print("input text embeddings :", text_embeddings.shape)
-        # define initial latents
-        latents = self.image2latent(image)
-
-        # unconditional embedding for classifier free guidance
-        if guidance_scale > 1.:
-            max_length = text_input.input_ids.shape[-1]
-            unconditional_input = self.tokenizer(
-                [""] * batch_size,
-                padding="max_length",
-                max_length=77,
-                return_tensors="pt"
-            )
-            unconditional_embeddings = self.text_encoder(
-                unconditional_input.input_ids.to(DEVICE))[0]
-            text_embeddings = torch.cat(
-                [unconditional_embeddings, text_embeddings], dim=0)
-
-        print("latents shape: ", latents.shape)
-        # interative sampling
-        self.scheduler.set_timesteps(num_inference_steps)
-        print("Valid timesteps: ", reversed(self.scheduler.timesteps))
-        # print("attributes: ", self.scheduler.__dict__)
-        latents_list = [latents]
-        pred_x0_list = [latents]
-        for i, t in enumerate(tqdm.tqdm(reversed(self.scheduler.timesteps), desc="DDIM Inversion")):
-            if num_actual_inference_steps is not None and i >= num_actual_inference_steps:
-                continue
-
-            if guidance_scale > 1.:
-                model_inputs = torch.cat([latents] * 2)
-            else:
-                model_inputs = latents
-
-            # predict the noise
-            noise_pred = self.unet(
-                model_inputs, t, encoder_hidden_states=text_embeddings).sample
-            if guidance_scale > 1.:
-                noise_pred_uncon, noise_pred_con = noise_pred.chunk(2, dim=0)
-                noise_pred = noise_pred_uncon + guidance_scale * \
-                    (noise_pred_con - noise_pred_uncon)
-            # compute the previous noise sample x_t-1 -> x_t
-            latents, pred_x0 = self.inv_step(noise_pred, t, latents)
-            latents_list.append(latents)
-            pred_x0_list.append(pred_x0)
-
-        return latents
-
-    @torch.no_grad()
-    def ddim_inversion(self, latent, cond):
+    def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds, height, width):
         timesteps = reversed(self.scheduler.timesteps)
         with torch.autocast(device_type='cuda', dtype=torch.float32):
             for i, t in enumerate(tqdm.tqdm(timesteps, desc="DDIM inversion")):
-                cond_batch = cond.repeat(latent.shape[0], 1, 1)
+
+                original_size = (height, width)
+                target_size = (height, width)
+                add_time_ids = self._get_add_time_ids(
+                    original_size, (0,0), target_size, dtype=prompt_embeds.dtype
+                )
+                add_time_ids = add_time_ids.to(prompt_embeds.device).repeat(1, 1)
+
+                added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
+
+
+                eps = self.unet(
+                    latent, t, encoder_hidden_states=prompt_embeds, added_cond_kwargs=added_cond_kwargs).sample
 
                 alpha_prod_t = self.scheduler.alphas_cumprod[t]
                 alpha_prod_t_prev = (
@@ -238,14 +168,8 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                 sigma = (1 - alpha_prod_t) ** 0.5
                 sigma_prev = (1 - alpha_prod_t_prev) ** 0.5
 
-                eps = self.unet(
-                    latent, t, encoder_hidden_states=cond_batch).sample
-
                 pred_x0 = (latent - sigma_prev * eps) / mu_prev
                 latent = mu * pred_x0 + sigma * eps
-        #         if save_latents:
-        #             torch.save(latent, os.path.join(save_path, f'noisy_latents_{t}.pt'))
-        # torch.save(latent, os.path.join(save_path, f'noisy_latents_{t}.pt'))
         return latent
 
     def step(
@@ -278,12 +202,12 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
             image = image.permute(2, 0, 1).unsqueeze(0)
         # input image density range [-1, 1]
         latents = self.vae.encode(image.to(DEVICE))['latent_dist'].mean
-        latents = latents * 0.18215
+        latents = latents * self.vae.config.scaling_factor
         return latents
 
     @torch.no_grad()
     def latent2image(self, latents, return_type='np'):
-        latents = 1 / 0.18215 * latents.detach()
+        latents = 1 / self.vae.config.scaling_factor * latents.detach()
         image = self.vae.decode(latents)['sample']
         if return_type == 'np':
             image = (image / 2 + 0.5).clamp(0, 1)
@@ -295,20 +219,20 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
         return image
 
     def latent2image_grad(self, latents):
-        latents = 1 / 0.18215 * latents
+        latents = 1 / self.vae.config.scaling_factor * latents
         image = self.vae.decode(latents)['sample']
 
         return image  # range [-1, 1]
 
     @torch.no_grad()
-    def cal_latent(self, num_inference_steps, guidance_scale, unconditioning, img_noise_0, img_noise_1, text_embeddings_0, text_embeddings_1, lora_0, lora_1, alpha, use_lora, fix_lora=None):
-        # latents = torch.cos(alpha * torch.pi / 2) * img_noise_0 + \
-        #     torch.sin(alpha * torch.pi / 2) * img_noise_1
-        # latents = (1 - alpha) * img_noise_0 + alpha * img_noise_1
-        # latents = latents / ((1 - alpha) ** 2 + alpha ** 2)
+    def cal_latent(self, num_inference_steps, guidance_scale, unconditioning, img_noise_0, img_noise_1, prompt_embeds_0, pooled_prompt_embeds_0, prompt_embeds_1, pooled_prompt_embeds_1, lora_0, lora_1, alpha, use_lora, height, width, fix_lora=None):
+
         latents = slerp(img_noise_0, img_noise_1, alpha, self.use_adain)
-        text_embeddings = (1 - alpha) * text_embeddings_0 + \
-            alpha * text_embeddings_1
+        prompt_embeds = (1 - alpha) * prompt_embeds_0 + \
+            alpha * prompt_embeds_1
+
+        pooled_prompt_embeds = (1 - alpha) * pooled_prompt_embeds_0 + \
+            alpha * pooled_prompt_embeds_1
 
         self.scheduler.set_timesteps(num_inference_steps)
         if use_lora:
@@ -319,57 +243,39 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
 
         for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha}")):
 
-            if guidance_scale > 1.:
-                model_inputs = torch.cat([latents] * 2)
-            else:
-                model_inputs = latents
-            if unconditioning is not None and isinstance(unconditioning, list):
-                _, text_embeddings = text_embeddings.chunk(2)
-                text_embeddings = torch.cat(
-                    [unconditioning[i].expand(*text_embeddings.shape), text_embeddings])
+            model_inputs = torch.cat([latents] * 2) if guidance_scale > 1. else latents
+
+            original_size = (height, width)
+            target_size = (height, width)
+            add_time_ids = self._get_add_time_ids(
+                original_size, (0,0), target_size, dtype=prompt_embeds.dtype
+            )
+            add_time_ids = add_time_ids.to(prompt_embeds.device).repeat(2 if guidance_scale > 1. else 1, 1)
+
+            added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
+
             # predict the noise
             noise_pred = self.unet(
-                model_inputs, t, encoder_hidden_states=text_embeddings).sample
+                model_inputs, t, encoder_hidden_states=prompt_embeds, added_cond_kwargs=added_cond_kwargs).sample
+
+            # perform guidance
             if guidance_scale > 1.0:
-                noise_pred_uncon, noise_pred_con = noise_pred.chunk(
-                    2, dim=0)
-                noise_pred = noise_pred_uncon + guidance_scale * \
-                    (noise_pred_con - noise_pred_uncon)
+                noise_pred_uncon, noise_pred_con = noise_pred.chunk(2, dim=0)
+                noise_pred = noise_pred_uncon + guidance_scale * (noise_pred_con - noise_pred_uncon)
+
             # compute the previous noise sample x_t -> x_t-1
             latents = self.scheduler.step(
                 noise_pred, t, latents, return_dict=False)[0]
         return latents
 
     @torch.no_grad()
-    def get_text_embeddings(self, prompt, guidance_scale, neg_prompt, batch_size):
+    def get_text_embeddings(self, prompt, prompt_2, guidance_scale, neg_prompt, neg_prompt_2, batch_size):
         DEVICE = torch.device(
             "cuda") if torch.cuda.is_available() else torch.device("cpu")
-        # text embeddings
-        text_input = self.tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=77,
-            return_tensors="pt"
-        )
-        text_embeddings = self.text_encoder(text_input.input_ids.cuda())[0]
 
-        if guidance_scale > 1.:
-            if neg_prompt:
-                uc_text = neg_prompt
-            else:
-                uc_text = ""
-            unconditional_input = self.tokenizer(
-                [uc_text] * batch_size,
-                padding="max_length",
-                max_length=77,
-                return_tensors="pt"
-            )
-            unconditional_embeddings = self.text_encoder(
-                unconditional_input.input_ids.to(DEVICE))[0]
-            text_embeddings = torch.cat(
-                [unconditional_embeddings, text_embeddings], dim=0)
+        prompt_embeds, _, pooled_prompt_embeds, _ = self.encode_prompt(prompt=prompt, prompt_2=prompt_2, device=DEVICE, num_images_per_prompt=1, do_classifier_free_guidance=guidance_scale > 1.0, negative_prompt=neg_prompt, negative_prompt_2=neg_prompt_2)
 
-        return text_embeddings
+        return prompt_embeds, pooled_prompt_embeds
 
     def __call__(
             self,
@@ -433,7 +339,7 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                 weight_name = f"{output_path.split('/')[-1]}_lora_0.ckpt"
                 load_lora_path_0 = save_lora_dir + "/" + weight_name
                 if not os.path.exists(load_lora_path_0):
-                    train_lora(img_0, prompt_0, save_lora_dir, None, self.tokenizer, self.text_encoder,
+                    train_lora(img_0, prompt_0, save_lora_dir, None, self.tokenizer, self.text_encoder, self.tokenizer_2, self.text_encoder_2,
                                self.vae, self.unet, self.scheduler, lora_steps, lora_lr, lora_rank, weight_name=weight_name)
             print(f"Load from {load_lora_path_0}.")
             if load_lora_path_0.endswith(".safetensors"):
@@ -446,7 +352,7 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                 weight_name = f"{output_path.split('/')[-1]}_lora_1.ckpt"
                 load_lora_path_1 = save_lora_dir + "/" + weight_name
                 if not os.path.exists(load_lora_path_1):
-                    train_lora(img_1, prompt_1, save_lora_dir, None, self.tokenizer, self.text_encoder,
+                    train_lora(img_1, prompt_1, save_lora_dir, None, self.tokenizer, self.text_encoder, self.tokenizer_2, self.text_encoder_2,
                                self.vae, self.unet, self.scheduler, lora_steps, lora_lr, lora_rank, weight_name=weight_name)
             print(f"Load from {load_lora_path_1}.")
             if load_lora_path_1.endswith(".safetensors"):
@@ -457,20 +363,20 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
         else:
             lora_0 = lora_1 = None
 
-        text_embeddings_0 = self.get_text_embeddings(
-            prompt_0, guidance_scale, neg_prompt, batch_size)
-        text_embeddings_1 = self.get_text_embeddings(
-            prompt_1, guidance_scale, neg_prompt, batch_size)
-        img_0 = get_img(img_0)
-        img_1 = get_img(img_1)
+        prompt_embeds_0, pooled_prompt_embeds_0 = self.get_text_embeddings(
+            prompt_0, prompt_0, guidance_scale, neg_prompt, neg_prompt, batch_size)
+        prompt_embeds_1, pooled_prompt_embeds_1 = self.get_text_embeddings(
+            prompt_1, prompt_1, guidance_scale, neg_prompt, neg_prompt, batch_size)
+        img_0 = get_img(img_0, height, width)
+        img_1 = get_img(img_1, height, width)
         if self.use_lora:
             self.unet = load_lora(self.unet, lora_0, lora_1, 0)
         img_noise_0 = self.ddim_inversion(
-            self.image2latent(img_0), text_embeddings_0)
+            self.image2latent(img_0), prompt_embeds_0, pooled_prompt_embeds_0, height, width)
         if self.use_lora:
             self.unet = load_lora(self.unet, lora_0, lora_1, 1)
         img_noise_1 = self.ddim_inversion(
-            self.image2latent(img_1), text_embeddings_1)
+            self.image2latent(img_1), prompt_embeds_1, pooled_prompt_embeds_1, height, width)
 
         print("latents shape: ", img_noise_0.shape)
 
@@ -502,12 +408,16 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                     unconditioning,
                     img_noise_0,
                     img_noise_1,
-                    text_embeddings_0,
-                    text_embeddings_1,
+                    prompt_embeds_0,
+                    pooled_prompt_embeds_0,
+                    prompt_embeds_1,
+                    pooled_prompt_embeds_1,
                     lora_0,
                     lora_1,
                     alpha_list[0],
                     False,
+                    height,
+                    width,
                     fix_lora
                 )
                 first_image = self.latent2image(latents)
@@ -538,12 +448,16 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                     unconditioning,
                     img_noise_0,
                     img_noise_1,
-                    text_embeddings_0,
-                    text_embeddings_1,
+                    prompt_embeds_0,
+                    pooled_prompt_embeds_0,
+                    prompt_embeds_1,
+                    pooled_prompt_embeds_1,
                     lora_0,
                     lora_1,
                     alpha_list[-1],
                     False,
+                    height,
+                    width,
                     fix_lora
                 )
                 last_image = self.latent2image(latents)
@@ -578,12 +492,16 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                         unconditioning,
                         img_noise_0,
                         img_noise_1,
-                        text_embeddings_0,
-                        text_embeddings_1,
+                        prompt_embeds_0,
+                        pooled_prompt_embeds_0,
+                        prompt_embeds_1,
+                        pooled_prompt_embeds_1,
                         lora_0,
                         lora_1,
                         alpha_list[i],
                         False,
+                        height,
+                        width,
                         fix_lora
                     )
                     image = self.latent2image(latents)
@@ -603,12 +521,16 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
                         unconditioning,
                         img_noise_0,
                         img_noise_1,
-                        text_embeddings_0,
-                        text_embeddings_1,
+                        prompt_embeds_0,
+                        pooled_prompt_embeds_0,
+                        prompt_embeds_1,
+                        pooled_prompt_embeds_1,
                         lora_0,
                         lora_1,
                         alpha_list[k],
                         self.use_lora,
+                        height,
+                        width,
                         fix_lora
                     )
                     image = self.latent2image(latents)

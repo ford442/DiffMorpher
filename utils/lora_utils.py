@@ -81,21 +81,26 @@ def tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None):
 
     return text_inputs
 
-def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_attention_mask=False):
-    text_input_ids = input_ids.to(text_encoder.device)
+def encode_prompt(text_encoders, tokenizers, prompt):
+    prompt_embeds_list = []
 
-    if text_encoder_use_attention_mask:
-        attention_mask = attention_mask.to(text_encoder.device)
-    else:
-        attention_mask = None
+    for tokenizer, text_encoder in zip(tokenizers, text_encoders):
+        text_input_ids = tokenize_prompt(tokenizer, prompt)
 
-    prompt_embeds = text_encoder(
-        text_input_ids,
-        attention_mask=attention_mask,
-    )
-    prompt_embeds = prompt_embeds[0]
+        prompt_embeds = text_encoder(
+            text_input_ids.to(text_encoder.device),
+            output_hidden_states=True,
+        )
 
-    return prompt_embeds
+        pooled_prompt_embeds = prompt_embeds[0]
+        prompt_embeds = prompt_embeds.hidden_states[-2]
+        bs_embed, seq_len, _ = prompt_embeds.shape
+        prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
+        prompt_embeds_list.append(prompt_embeds)
+
+    prompt_embeds = torch.concat(prompt_embeds_list, dim=-1)
+    pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed, -1)
+    return prompt_embeds, pooled_prompt_embeds
 
 # model_path: path of the model
 # image: input image, have not been pre-processed
@@ -104,7 +109,7 @@ def encode_prompt(text_encoder, input_ids, attention_mask, text_encoder_use_atte
 # lora_steps: number of lora training step
 # lora_lr: learning rate of lora training
 # lora_rank: the rank of lora
-def train_lora(image, prompt, save_lora_dir, model_path=None, tokenizer=None, text_encoder=None, vae=None, unet=None, noise_scheduler=None, lora_steps=200, lora_lr=2e-4, lora_rank=16, weight_name=None, safe_serialization=False, progress=tqdm):
+def train_lora(image, prompt, save_lora_dir, model_path=None, tokenizer=None, text_encoder=None, tokenizer_2=None, text_encoder_2=None, vae=None, unet=None, noise_scheduler=None, lora_steps=200, lora_lr=2e-4, lora_rank=16, weight_name=None, safe_serialization=False, progress=tqdm):
     # initialize accelerator
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
@@ -201,12 +206,8 @@ def train_lora(image, prompt, save_lora_dir, model_path=None, tokenizer=None, te
 
     # initialize text embeddings
     with torch.no_grad():
-        text_inputs = tokenize_prompt(tokenizer, prompt, tokenizer_max_length=None)
-        text_embedding = encode_prompt(
-            text_encoder,
-            text_inputs.input_ids,
-            text_inputs.attention_mask,
-            text_encoder_use_attention_mask=False
+        prompt_embeds, pooled_prompt_embeds = encode_prompt(
+            [text_encoder, text_encoder_2], [tokenizer, tokenizer_2], prompt
         )
 
     if type(image) == np.ndarray:
@@ -215,7 +216,7 @@ def train_lora(image, prompt, save_lora_dir, model_path=None, tokenizer=None, te
     # initialize latent distribution
     image_transforms = transforms.Compose(
         [
-            transforms.Resize(512, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILINEAR),
             # transforms.RandomCrop(512),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
@@ -242,8 +243,14 @@ def train_lora(image, prompt, save_lora_dir, model_path=None, tokenizer=None, te
         # (this is the forward diffusion process)
         noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
 
+        original_size = (height, width)
+        target_size = (height, width)
+
+        add_time_ids = torch.tensor([[original_size[0], original_size[1], 0, 0, target_size[0], target_size[1]]], device=device)
+        added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
+
         # Predict the noise residual
-        model_pred = unet(noisy_model_input, timesteps, text_embedding).sample
+        model_pred = unet(noisy_model_input, timesteps, prompt_embeds, added_cond_kwargs=added_cond_kwargs).sample
 
         # Get the target for loss depending on the prediction type
         if noise_scheduler.config.prediction_type == "epsilon":
