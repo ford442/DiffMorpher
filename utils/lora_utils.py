@@ -176,9 +176,9 @@ def train_lora(
             )
         else:
             if hasattr(F, "scaled_dot_product_attention"):
-                lora_attn_processor_class = LoRAAttnProcessor2_0
+                lora_attn_processor_class = LoRAAttnProcessor2_0
             else:
-                lora_attn_processor_class = LoRAAttnProcessor
+                lora_attn_processor_class = LoRAAttnProcessor
 
             # Initialize with NO arguments
             processor = lora_attn_processor_class() 
