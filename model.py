@@ -77,7 +77,18 @@ class LoadProcessor():
 
 
 class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
-
+    _components = [
+        "vae",
+        "text_encoder",
+        "text_encoder_2",
+        "tokenizer",
+        "tokenizer_2",
+        "unet",
+        "scheduler",
+        "safety_checker",
+        "feature_extractor",
+        "image_encoder",
+    ]
     def __init__(
         self,
         vae: AutoencoderKL,
