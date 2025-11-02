@@ -116,12 +116,84 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
     # inv_step, image2latent, latent2image, latent2image_grad, step
     # are all identical to the original model.py and can be copied over verbatim.
-    # ... (Copy inv_step from model.py) ...
-    # ... (Copy image2latent from model.py) ...
-    # ... (Copy latent2image from model.py) ...
-    # ... (Copy latent2image_grad from model.py) ...
-    # ... (Copy step from model.py) ...
-    
+
+    def inv_step(
+        self,
+        model_output: torch.FloatTensor,
+        timestep: int,
+        x: torch.FloatTensor,
+        eta=0.,
+        verbose=False
+    ):
+        """
+        Inverse sampling for DDIM Inversion
+        """
+        if verbose:
+            print("timestep: ", timestep)
+        next_step = timestep
+        timestep = min(timestep - self.scheduler.config.num_train_timesteps //
+                       self.scheduler.num_inference_steps, 999)
+        alpha_prod_t = self.scheduler.alphas_cumprod[
+            timestep] if timestep >= 0 else self.scheduler.final_alpha_cumprod
+        alpha_prod_t_next = self.scheduler.alphas_cumprod[next_step]
+        beta_prod_t = 1 - alpha_prod_t
+        pred_x0 = (x - beta_prod_t**0.5 * model_output) / alpha_prod_t**0.5
+        pred_dir = (1 - alpha_prod_t_next)**0.5 * model_output
+        x_next = alpha_prod_t_next**0.5 * pred_x0 + pred_dir
+        return x_next, pred_x0
+
+        @torch.no_grad()
+    def image2latent(self, image):
+        DEVICE = torch.device(
+            "cuda") if torch.cuda.is_available() else torch.device("cpu")
+        if type(image) is Image:
+            image = np.array(image)
+            image = torch.from_numpy(image).float() / 127.5 - 1
+            image = image.permute(2, 0, 1).unsqueeze(0)
+        # input image density range [-1, 1]
+        latents = self.vae.encode(image.to(DEVICE))['latent_dist'].mean
+        latents = latents * 0.18215
+        return latents
+
+    @torch.no_grad()
+    def latent2image(self, latents, return_type='np'):
+        latents = 1 / 0.18215 * latents.detach()
+        image = self.vae.decode(latents)['sample']
+        if return_type == 'np':
+            image = (image / 2 + 0.5).clamp(0, 1)
+            image = image.cpu().permute(0, 2, 3, 1).numpy()[0]
+            image = (image * 255).astype(np.uint8)
+        elif return_type == "pt":
+            image = (image / 2 + 0.5).clamp(0, 1)
+
+        return image
+
+    def latent2image_grad(self, latents):
+        latents = 1 / 0.18215 * latents
+        image = self.vae.decode(latents)['sample']
+
+        return image  # range [-1, 1]
+        
+    def step(
+        self,
+        model_output: torch.FloatTensor,
+        timestep: int,
+        x: torch.FloatTensor,
+    ):
+        """
+        predict the sample of the next step in the denoise process.
+        """
+        prev_timestep = timestep - \
+            self.scheduler.config.num_train_timesteps // self.scheduler.num_inference_steps
+        alpha_prod_t = self.scheduler.alphas_cumprod[timestep]
+        alpha_prod_t_prev = self.scheduler.alphas_cumprod[
+            prev_timestep] if prev_timestep > 0 else self.scheduler.final_alpha_cumprod
+        beta_prod_t = 1 - alpha_prod_t
+        pred_x0 = (x - beta_prod_t**0.5 * model_output) / alpha_prod_t**0.5
+        pred_dir = (1 - alpha_prod_t_prev)**0.5 * model_output
+        x_prev = alpha_prod_t_prev**0.5 * pred_x0 + pred_dir
+        return x_prev, pred_x0   
+        
     # SDXL Change: ddim_inversion needs to be updated for dual encoders
     @torch.no_grad()
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
