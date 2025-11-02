@@ -4,11 +4,8 @@ import numpy as np
 import cv2
 from PIL import Image
 from argparse import ArgumentParser
-# SDXL Change: Import the new pipeline
-from model_xl import DiffMorpherPipelineXL 
-# SDXL Change: We also need to import the new LoRA utils
-# so that model_xl.py can find it
-import utils.lora_utils_xl
+from model import DiffMorpherPipelineXL 
+import utils.lora_utils
 
 parser = ArgumentParser()
 parser.add_argument(
