@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 
+# (calc_mean_std is identical to the original)
 def calc_mean_std(feat, eps=1e-5):
     # eps is a small value added to the variance to avoid divide-by-zero.
     size = feat.size()
@@ -16,8 +17,10 @@ def calc_mean_std(feat, eps=1e-5):
         feat_mean = feat.view(N, C, -1).mean(dim=2).view(N, C, 1, 1)
     return feat_mean, feat_std
 
-
-def get_img(img, resolution=512):
+def get_img(img, resolution=1024):
+    """
+    SDXL Change: Default resolution is now 1024.
+    """
     norm_mean = [0.5, 0.5, 0.5]
     norm_std = [0.5, 0.5, 0.5]
     transform = transforms.Compose([
@@ -28,6 +31,7 @@ def get_img(img, resolution=512):
     img = transform(img)
     return img.unsqueeze(0)
 
+# (slerp is identical to the original)
 @torch.no_grad()
 def slerp(p0, p1, fract_mixing: float, adain=True):
     r""" Copied from lunarring/latentblending
@@ -80,7 +84,7 @@ def slerp(p0, p1, fract_mixing: float, adain=True):
 
     return interp
 
-
+# (do_replace_attn is identical to the original)
 def do_replace_attn(key: str):
     # return key.startswith('up_blocks.2') or key.startswith('up_blocks.3')
     return key.startswith('up')
