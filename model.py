@@ -98,10 +98,8 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             tokenizer_2=tokenizer_2,
             unet=unet,
             scheduler=scheduler,
-            safety_checker=safety_checker,
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
-            requires_safety_checker=requires_safety_checker,
         )
         self.img0_dict = dict()
         self.img1_dict = dict()
