@@ -180,8 +180,8 @@ def train_lora(
             # ALWAYS use LoRAAttnProcessor. It IS a module and works.
             lora_attn_processor_class = LoRAAttnProcessor
             unet_lora_attn_procs[name] = lora_attn_processor_class(
-                rank=lora_rank
-            )
+                rank=lora_rank
+            )
     
     unet.set_attn_processor(unet_lora_attn_procs)
     
