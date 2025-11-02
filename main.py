@@ -14,7 +14,8 @@ parser = ArgumentParser()
 parser.add_argument(
     "--model_path", type=str, 
     # SDXL Change: Default model is now SDXL
-    default="stabilityai/stable-diffusion-xl-base-1.0", 
+    #default="stabilityai/stable-diffusion-xl-base-1.0", 
+    default="ford442/RealVisXL_V5.0_BF16", 
     help="Pretrained model to use (default: %(default)s)"
 )
 parser.add_argument(
