@@ -171,10 +171,20 @@ def train_lora(
         # This is for SDXL SELF-ATTENTION (is a torch.nn.Module)
         # We FORCE LoRAAttnProcessor, which takes ONLY rank
         else:
-            lora_attn_processor_class = LoRAAttnProcessor
-            unet_lora_attn_procs[name] = lora_attn_processor_class(
-                rank=lora_rank
-            )
+            # This is for SDXL SELF-ATTENTION
+            if hasattr(F, "scaled_dot_product_attention"):
+                lora_attn_processor_class = LoRAAttnProcessor2_0
+            else:
+                lora_attn_processor_class = LoRAAttnProcessor
+
+            # Initialize with NO arguments
+            processor = lora_attn_processor_class() 
+
+            # Set attributes *after* initialization
+            processor.rank = lora_rank
+            processor.cross_attention_dim = cross_attention_dim
+
+            unet_lora_attn_procs[name] = processor
     
     unet.set_attn_processor(unet_lora_attn_procs)
 
