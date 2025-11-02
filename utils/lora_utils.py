@@ -125,7 +125,7 @@ def train_lora(
     if vae is None:
         vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None)
     if unet is None:
-        unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None)
+        unet = UNet2DCondDitionModel.from_pretrained(model_path, subfolder="unet", revision=None)
     if noise_scheduler is None:
         noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
@@ -159,7 +159,6 @@ def train_lora(
             hidden_size = unet.config.block_out_channels[0]
 
         # This is for SDXL CROSS-ATTENTION (is a torch.nn.Module)
-        # Takes hidden_size, cross_attention_dim, and rank
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
             unet_lora_attn_procs[name] = lora_attn_processor_class(
@@ -169,31 +168,25 @@ def train_lora(
             )
 
         # This is for SDXL SELF-ATTENTION
-        # We must use LoRAAttnProcessor2_0, which IS a nn.Module.
-        # The original LoRAAttnProcessor is not a nn.Module and causes the TypeError.
         else:
             # *** THIS IS THE FIX ***
-            # Before: lora_attn_processor_class = LoRAAttnProcessor
+            # 1. Use the 2_0 class which IS a nn.Module
             lora_attn_processor_class = LoRAAttnProcessor2_0
 
-            # Pass arguments directly to the constructor, just like for the 'AddedKV' processor
-            # Before:
-            #   processor = lora_attn_processor_class()
-            #   processor.rank = lora_rank
-            #   ...
-            #   unet_lora_attn_procs[name] = processor
-            unet_lora_attn_procs[name] = lora_attn_processor_class(
-                hidden_size=hidden_size,
-                cross_attention_dim=cross_attention_dim,
-                rank=lora_rank
-            )
+            # 2. Instantiate with NO arguments (this fixes the TypeError)
+            processor = lora_attn_processor_class()
+
+            # 3. Set attributes *after* initialization, just like your original code
+            processor.rank = lora_rank
+            processor.cross_attention_dim = cross_attention_dim
+
+            unet_lora_attn_procs[name] = processor
             # *** END OF FIX ***
 
     unet.set_attn_processor(unet_lora_attn_procs)
 
     # --- 2. Correctly gather parameters ---
-    # ALL processors are now Modules, so we just wrap them all
-    # This line will no longer fail
+    # This line should now work
     unet_lora_layers = AttnProcsLayers(unet.attn_processors)
 
     # Move the new module to the correct device and dtype
@@ -228,7 +221,7 @@ def train_lora(
         unet_lora_layers, optimizer, lr_scheduler
     )
 
-    # --- 6. Get embeddings and conditioning ---
+    # --- 6. Get embeddings and conditioning (remains the same) ---
     with torch.no_grad():
         prompt_embeds, pooled_prompt_embeds = encode_prompt_xl(
             text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
@@ -259,7 +252,7 @@ def train_lora(
     with torch.no_grad():
         latents_dist = vae.encode(image.to(dtype=unet.dtype)).latent_dist
 
-    # --- 7. Training loop ---
+    # --- 7. Training loop (remains the same) ---
     for _ in progress.tqdm(range(lora_steps), desc="Training LoRA..."):
         model_input = latents_dist.sample() * vae.config.scaling_factor
         model_input = model_input.to(dtype=unet.dtype)
@@ -291,7 +284,7 @@ def train_lora(
         lr_scheduler.step()
         optimizer.zero_grad()
 
-    # --- 8. Save weights ---
+    # --- 8. Save weights (remains the same) ---
     unet_lora_layers = accelerator.unwrap_model(unet_lora_layers)
 
     LoraLoaderMixin.save_lora_weights(
