@@ -178,11 +178,12 @@ def train_lora(
         # This is for SDXL SELF-ATTENTION
         else:
             if hasattr(F, "scaled_dot_product_attention"):
-                lora_attn_processor_class = LoRAAttnProcessor2_0
-                processor = lora_attn_processor_class() 
-                processor.rank = lora_rank
-                processor.cross_attention_dim = cross_attention_dim
-                unet_lora_attn_procs[name] = processor
+                lora_attn_processor_class = LoRAAttnProcessor
+                unet_lora_attn_procs[name] = lora_attn_processor_class(
+                    hidden_size=hidden_size, 
+                    cross_attention_dim=cross_attention_dim, 
+                    rank=lora_rank
+                )
             else:
                 lora_attn_processor_class = LoRAAttnProcessor
                 unet_lora_attn_procs[name] = lora_attn_processor_class(
@@ -193,18 +194,14 @@ def train_lora(
     
     unet.set_attn_processor(unet_lora_attn_procs)
     
-    module_attn_procs = {k: v for k, v in unet.attn_processors.items() if isinstance(v, torch.nn.Module)}
-    unet_lora_layers = AttnProcsLayers(module_attn_procs)
+    unet_lora_layers = AttnProcsLayers(unet.attn_processors)
     
+    # Move the new module to the correct device and dtype
     unet_lora_layers.to(device, dtype=unet.dtype) 
 
+    # Get parameters ONLY from this new module. This is now guaranteed
+    # to find all LoRA parameters.
     params_to_optimize = list(unet_lora_layers.parameters())
-    for name, param in unet.named_parameters():
-        if "lora" in name:
-            # Check if this param is *already* in our list to avoid double-counting
-            is_already_added = any(id(p) == id(param) for p in params_to_optimize)
-            if not is_already_added:
-                params_to_optimize.append(param)
 
     if not params_to_optimize:
             raise ValueError("No LoRA parameters found to optimize. "
@@ -228,8 +225,8 @@ def train_lora(
     )
 
     # 5. Prepare ALL models, optimizer, and scheduler with accelerate
-    unet, unet_lora_layers, optimizer, lr_scheduler = accelerator.prepare(
-        unet, unet_lora_layers, optimizer, lr_scheduler
+    unet_lora_layers, optimizer, lr_scheduler = accelerator.prepare(
+        unet_lora_layers, optimizer, lr_scheduler
     )
 
     # SDXL Change: Get dual text embeddings
@@ -307,7 +304,6 @@ def train_lora(
 
     # (Saving logic is identical)
     # We must unwrap the models before saving
-    unet = accelerator.unwrap_model(unet)
     unet_lora_layers = accelerator.unwrap_model(unet_lora_layers)
     
     LoraLoaderMixin.save_lora_weights(
