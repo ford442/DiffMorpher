@@ -15,9 +15,7 @@ from diffusers import StableDiffusionXLPipeline # SDXL Change
 from argparse import ArgumentParser
 import inspect
 
-# SDXL Change: Import from our new xl utils
-from utils.model_utils_xl import get_img, slerp, do_replace_attn 
-# SDXL Change: Import from original lora_utils (will be updated to lora_utils_xl later)
+from utils.model_utils import get_img, slerp, do_replace_attn 
 from utils.lora_utils import train_lora, load_lora
 from utils.alpha_scheduler import AlphaScheduler
 
