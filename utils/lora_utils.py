@@ -131,19 +131,19 @@ def train_lora(
     if text_encoder_2 is None:
         text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", revision=None)
     if vae is None:
-        vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None, variant="fp16")
+        vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None)
     if unet is None:
-        unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None, variant="fp16")
+        unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None)
     if noise_scheduler is None:
         noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     
     # SDXL: Use fp16 for VAE
-    vae.to(device, dtype=torch.float16)
-    text_encoder.to(device)
-    text_encoder_2.to(device)
-    unet.to(device, dtype=torch.float16) # SDXL: Use fp16 for UNet
+    vae.to(device, dtype=torch.bfloat16)
+    #text_encoder.to(device)
+    #text_encoder_2.to(device)
+    unet.to(device, dtype=torch.bfloat16) # SDXL: Use fp16 for UNet
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
@@ -222,7 +222,7 @@ def train_lora(
     
     # SDXL: VAE in fp16
     with torch.no_grad():
-        latents_dist = vae.encode(image.to(dtype=torch.float16)).latent_dist
+        latents_dist = vae.encode(image.to(dtype=torch.bfloat16)).latent_dist
 
     # Training loop
     for _ in progress.tqdm(range(lora_steps), desc="Training LoRA..."):
@@ -230,7 +230,7 @@ def train_lora(
         model_input = latents_dist.sample() * vae.config.scaling_factor
         
         # SDXL: Cast model_input to fp16
-        model_input = model_input.to(dtype=torch.float16)
+        model_input = model_input.to(dtype=torch.bfloat16)
 
         noise = torch.randn_like(model_input)
         bsz, channels, height, width = model_input.shape
