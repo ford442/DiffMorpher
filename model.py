@@ -110,7 +110,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         Forcefully return ONLY the components that are modules
         to bypass the config introspection bug.
         """
-        return {
+        comps = {
             "vae": self.vae,
             "text_encoder": self.text_encoder,
             "text_encoder_2": self.text_encoder_2,
@@ -118,10 +118,17 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             "tokenizer_2": self.tokenizer_2,
             "unet": self.unet,
             "scheduler": self.scheduler,
-            "safety_checker": self.safety_checker,
-            "feature_extractor": self.feature_extractor,
-            "image_encoder": self.image_encoder,
-    }
+        }
+
+        # Add optional components only if they exist
+        if hasattr(self, "safety_checker") and self.safety_checker is not None:
+            comps["safety_checker"] = self.safety_checker
+        if hasattr(self, "feature_extractor") and self.feature_extractor is not None:
+            comps["feature_extractor"] = self.feature_extractor
+        if hasattr(self, "image_encoder") and self.image_encoder is not None:
+            comps["image_encoder"] = self.image_encoder
+
+        return comps
     
     def inv_step(
         self,
