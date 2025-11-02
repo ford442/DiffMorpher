@@ -178,7 +178,7 @@ def train_lora(
         # This is for SDXL SELF-ATTENTION
         else:
             if hasattr(F, "scaled_dot_product_attention"):
-                lora_attn_processor_class = LoRAAttnProcessor2_0
+                lora_attn_processor_class = LoRAAttnProcessor2_0
                 processor = lora_attn_processor_class() 
                 processor.rank = lora_rank
                 processor.cross_attention_dim = cross_attention_dim
