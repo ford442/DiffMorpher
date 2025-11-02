@@ -77,18 +77,7 @@ class LoadProcessor():
 
 
 class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
-    _components = [
-        "vae",
-        "text_encoder",
-        "text_encoder_2",
-        "tokenizer",
-        "tokenizer_2",
-        "unet",
-        "scheduler",
-        "safety_checker",
-        "feature_extractor",
-        "image_encoder",
-    ]
+
     def __init__(
         self,
         vae: AutoencoderKL,
@@ -114,7 +103,26 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         )
         self.img0_dict = dict()
         self.img1_dict = dict()
-
+        
+    @property
+    def components(self):
+        """
+        Forcefully return ONLY the components that are modules
+        to bypass the config introspection bug.
+        """
+        return {
+            "vae": self.vae,
+            "text_encoder": self.text_encoder,
+            "text_encoder_2": self.text_encoder_2,
+            "tokenizer": self.tokenizer,
+            "tokenizer_2": self.tokenizer_2,
+            "unet": self.unet,
+            "scheduler": self.scheduler,
+            "safety_checker": self.safety_checker,
+            "feature_extractor": self.feature_extractor,
+            "image_encoder": self.image_encoder,
+    }
+    
     def inv_step(
         self,
         model_output: torch.FloatTensor,
