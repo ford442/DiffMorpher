@@ -123,6 +123,7 @@ class DiffMorpherPipeline(StableDiffusionXLPipeline):
 
         super().__init__(vae, text_encoder, tokenizer, text_encoder_2, tokenizer_2, unet, scheduler,
                          safety_checker, feature_extractor, image_encoder, requires_safety_checker)
+        self.watermark = None
         self.img0_dict = dict()
         self.img1_dict = dict()
 
