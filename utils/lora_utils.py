@@ -144,16 +144,10 @@ def train_lora(
     unet.requires_grad_(False)
 
     # --- 1. Correctly instantiate all LoRA processors ---
-    #
-    # *** THIS IS THE FIX ***
-    # The LoRAAttnAddedKVProcessor class is an nn.Module and
-    # can handle *both* self-attention (where cross_attention_dim=None)
-    # and cross-attention (where cross_attention_dim is set).
-    # We will use it for ALL attention processors.
-    #
+    
     unet_lora_attn_procs = {}
     
-    # Use the correct LoRA processor class
+    # Use the correct LoRA processor class (this is an nn.Module)
     lora_attn_processor_class = LoRAAttnAddedKVProcessor
     
     for name, attn_processor in unet.attn_processors.items():
@@ -170,20 +164,20 @@ def train_lora(
         else:
             hidden_size = unet.config.block_out_channels[0]
 
-        # Instantiate the *same* nn.Module class for all processors.
-        # This will satisfy AttnProcsLayers.
+        # *** THIS IS THE FIX ***
+        # The constructor for LoRAAttnAddedKVProcessor only takes 'rank'
+        # and 'cross_attention_dim'. 'hidden_size' is not an argument.
         unet_lora_attn_procs[name] = lora_attn_processor_class(
-            hidden_size=hidden_size,
+            # hidden_size=hidden_size,  <-- REMOVED THIS LINE
             cross_attention_dim=cross_attention_dim,
             rank=lora_rank
         )
-    # *** END OF FIX ***
+        # *** END OF FIX ***
         
     unet.set_attn_processor(unet_lora_attn_procs)
 
     # --- 2. Correctly gather parameters ---
-    # This line will now succeed, because unet.attn_processors.values()
-    # contains *only* LoRAAttnAddedKVProcessor modules.
+    # This line will now succeed
     unet_lora_layers = AttnProcsLayers(unet.attn_processors)
     
     # Move the new module to the correct device and dtype
@@ -214,7 +208,6 @@ def train_lora(
     )
 
     # --- 5. Prepare with accelerate (ONLY the trainable module) ---
-    # This logic is now correct again.
     unet_lora_layers, optimizer, lr_scheduler = accelerator.prepare(
         unet_lora_layers, optimizer, lr_scheduler
     )
