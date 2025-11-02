@@ -151,63 +151,52 @@ def train_lora(
     unet.requires_grad_(False)
 
     # (LoRA setup for UNet is identical to original)
-    unet_lora_attn_procs = {}
-    for name, attn_processor in unet.attn_processors.items():
-        cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
-        if name.startswith("mid_block"):
-            hidden_size = unet.config.block_out_channels[-1]
-        elif name.startswith("up_blocks"):
-            block_id = int(name[len("up_blocks.")])
-            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
-        elif name.startswith("down_blocks"):
-            block_id = int(name[len("down_blocks.")])
-            hidden_size = unet.config.block_out_channels[block_id]
-        else:
-            hidden_size = unet.config.block_out_channels[0]
-
-        # This logic is for SDXL's cross-attention (AttnAddedKVProcessor)
-        # It needs hidden_size, cross_attention_dim, and rank.
-        if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
-            lora_attn_processor_class = LoRAAttnAddedKVProcessor
-            unet_lora_attn_procs[name] = lora_attn_processor_class(
-                hidden_size=hidden_size, 
-                cross_attention_dim=cross_attention_dim, 
-                rank=lora_rank
-            )
-
-        # This logic is for standard self-attention (AttnProcessor)
-        else:
-            if hasattr(F, "scaled_dot_product_attention"):
-                # LoRAAttnProcessor2_0 (modern) takes NO __init__ args
-                lora_attn_processor_class = LoRAAttnProcessor2_0
-                unet_lora_attn_procs[name] = lora_attn_processor_class()
-            else:
-                # LoRAAttnProcessor (fallback) takes hidden_size and rank
-                lora_attn_processor_class = LoRAAttnProcessor
-                unet_lora_attn_procs[name] = lora_attn_processor_class(
-                    hidden_size=hidden_size, 
-                    cross_attention_dim=cross_attention_dim, 
-                    rank=lora_rank
-                )
-
     unet.set_attn_processor(unet_lora_attn_procs)
-    unet_lora_layers = AttnProcsLayers(unet.attn_processors)
 
-    # (Optimizer setup is identical)
-    params_to_optimize = (unet_lora_layers.parameters())
+    # 2. Correctly gather parameters
+
+    # 2a. Gather parameters from Module-based processors (like LoRAAttnAddedKVProcessor)
+    module_attn_procs = {k: v for k, v in unet.attn_processors.items() if isinstance(v, torch.nn.Module)}
+    unet_lora_layers = AttnProcsLayers(module_attn_procs)
+    
+    # *** FIX 1: Move the new module to the correct device and dtype ***
+    unet_lora_layers.to(device, dtype=unet.dtype) 
+
+    # 2b. Gather ALL LoRA parameters
+    params_to_optimize = list(unet_lora_layers.parameters())
+    for name, param in unet.named_parameters():
+        if "lora" in name:
+            # Check if this param is *already* in our list to avoid double-counting
+            is_already_added = any(id(p) == id(param) for p in params_to_optimize)
+            if not is_already_added:
+                params_to_optimize.append(param)
+
+    if not params_to_optimize:
+            raise ValueError("No LoRA parameters found to optimize. "
+                             "This is a critical error in the LoRA setup.")
+
+    # 3. Optimizer creation
     optimizer = torch.optim.AdamW(
-        params_to_optimize, lr=lora_lr, betas=(0.9, 0.999), weight_decay=1e-2, eps=1e-08
-    )
-    lr_scheduler = get_scheduler(
-        "constant", optimizer=optimizer, num_warmup_steps=0, num_training_steps=lora_steps
+        params_to_optimize,
+        lr=lora_lr,
+        betas=(0.9, 0.999),
+        weight_decay=1e-2,
+        eps=1e-08,
     )
     
-    # Prepare accelerator
-    unet_lora_layers = accelerator.prepare_model(unet_lora_layers)
-    optimizer = accelerator.prepare_optimizer(optimizer)
-    lr_scheduler = accelerator.prepare_scheduler(lr_scheduler)
+    # *** FIX 2: Create the learning rate scheduler ***
+    lr_scheduler = get_scheduler(
+        "constant",
+        optimizer=optimizer,
+        num_warmup_steps=0,
+        num_training_steps=lora_steps,
+    )
 
-    # SDXL Change: Get dual text embeddings
+    # *** FIX 3: Prepare ALL models, optimizer, and scheduler with accelerate ***
+    # This single call replaces the separate prepare_model/optimizer/scheduler lines
+    unet, unet_lora_layers, optimizer, lr_scheduler = accelerator.prepare(
+        unet, unet_lora_layers, optimizer, lr_scheduler
+    )
     with torch.no_grad():
         prompt_embeds, pooled_prompt_embeds = encode_prompt_xl(
             text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
