@@ -14,10 +14,18 @@ from PIL import Image
 from torchvision import transforms
 from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
 from diffusers import StableDiffusionXLPipeline
-import diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl
-diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl.StableDiffusionXLWatermarker = StableDiffusionXLWatermarker
 from argparse import ArgumentParser
 import inspect
+
+import diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl
+
+class DummyWatermarker:
+    def __init__(self):
+        pass
+    def apply_watermark(self, image):
+        return image
+
+diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl.StableDiffusionXLWatermarker = DummyWatermarker
 
 from utils.model_utils import get_img, slerp, do_replace_attn
 from utils.lora_utils import train_lora, load_lora
