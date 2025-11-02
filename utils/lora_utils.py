@@ -151,28 +151,28 @@ def train_lora(
     lora_attn_processor_class = LoRAAttnAddedKVProcessor
     
     for name, attn_processor in unet.attn_processors.items():
-        # Determine hidden_size and cross_attention_dim
+        # Determine cross_attention_dim
         cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
-        if name.startswith("mid_block"):
-            hidden_size = unet.config.block_out_channels[-1]
-        elif name.startswith("up_blocks"):
-            block_id = int(name[len("up_blocks.")])
-            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
-        elif name.startswith("down_blocks"):
-            block_id = int(name[len("down_blocks.")])
-            hidden_size = unet.config.block_out_channels[block_id]
-        else:
-            hidden_size = unet.config.block_out_channels[0]
+        
+        # We no longer need hidden_size for instantiation
+        # if name.startswith("mid_block"):
+        #     hidden_size = unet.config.block_out_channels[-1]
+        # ... (rest of hidden_size logic removed)
 
         # *** THIS IS THE FIX ***
-        # The constructor for LoRAAttnAddedKVProcessor only takes 'rank'
-        # and 'cross_attention_dim'. 'hidden_size' is not an argument.
-        unet_lora_attn_procs[name] = lora_attn_processor_class(
-            # hidden_size=hidden_size,  <-- REMOVED THIS LINE
-            cross_attention_dim=cross_attention_dim,
+        # Based on all previous TypeErrors, the constructor likely ONLY takes rank.
+        # We will instantiate with rank, then set other attributes manually.
+        
+        # 1. Instantiate with only the rank
+        processor = lora_attn_processor_class(
             rank=lora_rank
         )
-        # *** END OF FIX ***
+        
+        # 2. Set cross_attention_dim manually after instantiation
+        #    This will be None for self-attn and a value for cross-attn
+        processor.cross_attention_dim = cross_attention_dim
+        
+        unet_lora_attn_procs[name] = processor
         
     unet.set_attn_processor(unet_lora_attn_procs)
 
