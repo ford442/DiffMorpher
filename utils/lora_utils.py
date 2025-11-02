@@ -183,7 +183,7 @@ def train_lora(
                 # LoRAAttnProcessor does NOT take hidden_size
                 cross_attention_dim=cross_attention_dim, 
                 rank=lora_rank
-            )
+            )
             else:
                 lora_attn_processor_class = LoRAAttnProcessor
                 unet_lora_attn_procs[name] = lora_attn_processor_class(
