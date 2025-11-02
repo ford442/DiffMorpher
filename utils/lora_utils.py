@@ -178,18 +178,12 @@ def train_lora(
         # This is for SDXL SELF-ATTENTION
         else:
             if hasattr(F, "scaled_dot_product_attention"):
-                # Modern processor (NOT a Module, takes NO __init__ args)
                 lora_attn_processor_class = LoRAAttnProcessor2_0
-
-                # Initialize with NO arguments
                 processor = lora_attn_processor_class() 
-                # Set attributes after initialization
                 processor.rank = lora_rank
                 processor.cross_attention_dim = cross_attention_dim
-
                 unet_lora_attn_procs[name] = processor
             else:
-                # Fallback processor (IS a Module)
                 lora_attn_processor_class = LoRAAttnProcessor
                 unet_lora_attn_procs[name] = lora_attn_processor_class(
                     hidden_size=hidden_size, 
@@ -197,19 +191,13 @@ def train_lora(
                     rank=lora_rank
                 )
     
-    # Set the processors *after* the loop
     unet.set_attn_processor(unet_lora_attn_procs)
-
-    # 2. Correctly gather parameters
     
-    # 2a. Gather parameters from Module-based processors (like LoRAAttnAddedKVProcessor)
     module_attn_procs = {k: v for k, v in unet.attn_processors.items() if isinstance(v, torch.nn.Module)}
     unet_lora_layers = AttnProcsLayers(module_attn_procs)
     
-    # Move the new module to the correct device and dtype
     unet_lora_layers.to(device, dtype=unet.dtype) 
 
-    # 2b. Gather ALL LoRA parameters
     params_to_optimize = list(unet_lora_layers.parameters())
     for name, param in unet.named_parameters():
         if "lora" in name:
