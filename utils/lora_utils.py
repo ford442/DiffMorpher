@@ -166,27 +166,30 @@ def train_lora(
             hidden_size = unet.config.block_out_channels[0]
 
         # This logic is for SDXL's cross-attention (AttnAddedKVProcessor)
+        # It needs hidden_size, cross_attention_dim, and rank.
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
-            # This class *does* take hidden_size
             unet_lora_attn_procs[name] = lora_attn_processor_class(
-                hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=lora_rank
+                hidden_size=hidden_size, 
+                cross_attention_dim=cross_attention_dim, 
+                rank=lora_rank
             )
 
         # This logic is for standard self-attention (AttnProcessor)
         else:
             if hasattr(F, "scaled_dot_product_attention"):
+                # LoRAAttnProcessor2_0 (modern) takes NO __init__ args
                 lora_attn_processor_class = LoRAAttnProcessor2_0
-                # THIS IS THE FIX: LoRAAttnProcessor2_0 does NOT take hidden_size
-                unet_lora_attn_procs[name] = lora_attn_processor_class(
-                    rank=lora_rank, cross_attention_dim=cross_attention_dim
-                )
+                unet_lora_attn_procs[name] = lora_attn_processor_class()
             else:
-                # Fallback LoRAAttnProcessor *does* take hidden_size
+                # LoRAAttnProcessor (fallback) takes hidden_size and rank
                 lora_attn_processor_class = LoRAAttnProcessor
                 unet_lora_attn_procs[name] = lora_attn_processor_class(
-                    hidden_size=hidden_size, cross_attention_dim=cross_attention_dim, rank=lora_rank
+                    hidden_size=hidden_size, 
+                    cross_attention_dim=cross_attention_dim, 
+                    rank=lora_rank
                 )
+
     unet.set_attn_processor(unet_lora_attn_procs)
     unet_lora_layers = AttnProcsLayers(unet.attn_processors)
 
