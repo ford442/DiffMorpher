@@ -105,6 +105,18 @@ class LoadProcessor():
 
 
 class DiffMorpherPipeline(StableDiffusionXLPipeline):
+    _components = [
+        "vae",
+        "text_encoder",
+        "tokenizer",
+        "text_encoder_2",
+        "tokenizer_2",
+        "unet",
+        "scheduler",
+        "safety_checker",
+        "feature_extractor",
+        "image_encoder",
+    ]
     def __init__(self,
                  vae: AutoencoderKL,
                  text_encoder: CLIPTextModel,
@@ -123,21 +135,6 @@ class DiffMorpherPipeline(StableDiffusionXLPipeline):
                          safety_checker, feature_extractor, image_encoder, requires_safety_checker)
         self.img0_dict = dict()
         self.img1_dict = dict()
-
-    @property
-    def components(self):
-        return {
-            "vae": self.vae,
-            "text_encoder": self.text_encoder,
-            "tokenizer": self.tokenizer,
-            "text_encoder_2": self.text_encoder_2,
-            "tokenizer_2": self.tokenizer_2,
-            "unet": self.unet,
-            "scheduler": self.scheduler,
-            "safety_checker": self.safety_checker,
-            "feature_extractor": self.feature_extractor,
-            "image_encoder": self.image_encoder,
-        }
 
     def inv_step(
         self,
