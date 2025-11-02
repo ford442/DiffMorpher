@@ -4,11 +4,17 @@ import numpy as np
 import cv2
 from PIL import Image
 from argparse import ArgumentParser
-from model import DiffMorpherPipeline
+# SDXL Change: Import the new pipeline
+from model_xl import DiffMorpherPipelineXL 
+# SDXL Change: We also need to import the new LoRA utils
+# so that model_xl.py can find it
+import utils.lora_utils_xl
 
 parser = ArgumentParser()
 parser.add_argument(
-    "--model_path", type=str, default="stabilityai/stable-diffusion-2-1-base",
+    "--model_path", type=str, 
+    # SDXL Change: Default model is now SDXL
+    default="stabilityai/stable-diffusion-xl-base-1.0", 
     help="Pretrained model to use (default: %(default)s)"
 )
 parser.add_argument(
@@ -24,11 +30,11 @@ parser.add_argument(
     "--prompt_1", type=str, default="",
     help="Prompt of the second image (default: %(default)s)")
 parser.add_argument(
-    "--output_path", type=str, default="./results",
+    "--output_path", type=str, default="./results_xl", # SDXL Change: New output path
     help="Path of the output image (default: %(default)s)"
 )
 parser.add_argument(
-    "--save_lora_dir", type=str, default="./lora",
+    "--save_lora_dir", type=str, default="./lora_xl", # SDXL Change: New LoRA path
     help="Path of the output lora directory (default: %(default)s)"
 )
 parser.add_argument(
@@ -74,9 +80,19 @@ parser.add_argument(
 args = parser.parse_args()
 
 os.makedirs(args.output_path, exist_ok=True)
-pipeline = DiffMorpherPipeline.from_pretrained(
-    args.model_path, torch_dtype=torch.float32)
+
+# SDXL Change: Use fp16 for faster inference
+pipeline = DiffMorpherPipelineXL.from_pretrained(
+    args.model_path, torch_dtype=torch.float16, variant="fp16"
+)
 pipeline.to("cuda")
+
+# We need to explicitly point model_xl.py to the new lora_utils_xl
+# This is a bit of a hack, but simpler than refactoring model_xl.py
+import model_xl
+model_xl.train_lora = utils.lora_utils_xl.train_lora
+model_xl.load_lora = utils.lora_utils_xl.load_lora
+
 images = pipeline(
     img_path_0=args.image_path_0,
     img_path_1=args.image_path_1,
@@ -92,7 +108,8 @@ images = pipeline(
     num_frames=args.num_frames,
     fix_lora=args.fix_lora_value,
     save_intermediates=args.save_inter,
-    use_lora=not args.no_lora
+    use_lora=not args.no_lora,
+    guidance_scale=7.5 # SDXL Change: Set a good default CFG
 )
 images[0].save(f"{args.output_path}/output.gif", save_all=True,
                append_images=images[1:], duration=args.duration, loop=0)
