@@ -120,8 +120,6 @@ def train_lora(
     set_seed(0)
 
     # Load models if not provided (for standalone testing)
-    # This logic is mostly for if this script were run independently
-    # In our pipeline, the models are passed in.
     if tokenizer is None:
         tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer", revision=None)
     if tokenizer_2 is None:
@@ -139,27 +137,72 @@ def train_lora(
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     
-    # SDXL: Use fp16 for VAE
-    vae.to(device, dtype=torch.bfloat16)
-    #text_encoder.to(device)
+    # Get the dtype from the unet, since main.py sets it
+    unet_dtype = unet.dtype 
+    
+    # SDXL: VAE matches unet dtype
+    vae.to(device, dtype=unet_dtype)
+    #text_encoder.to(device) # Text encoders stay in fp32
     #text_encoder_2.to(device)
-    unet.to(device, dtype=torch.bfloat16) # SDXL: Use fp16 for UNet
+    unet.to(device, dtype=unet_dtype) # Match the unet's dtype
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
 
-    # (LoRA setup for UNet is identical to original)
+    # 1. Correctly instantiate all LoRA processors
+    unet_lora_attn_procs = {}
+    for name, attn_processor in unet.attn_processors.items():
+        cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+        if name.startswith("mid_block"):
+            hidden_size = unet.config.block_out_channels[-1]
+        elif name.startswith("up_blocks"):
+            block_id = int(name[len("up_blocks.")])
+            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+        elif name.startswith("down_blocks"):
+            block_id = int(name[len("down_blocks.")])
+            hidden_size = unet.config.block_out_channels[block_id]
+        else:
+            hidden_size = unet.config.block_out_channels[0]
+
+        # This is for SDXL CROSS-ATTENTION (is a torch.nn.Module)
+        if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
+            lora_attn_processor_class = LoRAAttnAddedKVProcessor
+            unet_lora_attn_procs[name] = lora_attn_processor_class(
+                hidden_size=hidden_size, 
+                cross_attention_dim=cross_attention_dim, 
+                rank=lora_rank
+            )
+        
+        # This is for SDXL SELF-ATTENTION
+        else:
+            if hasattr(F, "scaled_dot_product_attention"):
+                # Modern processor (NOT a Module)
+                lora_attn_processor_class = LoRAAttnProcessor2_0
+                unet_lora_attn_procs[name] = lora_attn_processor_class(
+                    rank=lora_rank, 
+                    cross_attention_dim=cross_attention_dim
+                )
+            else:
+                # Fallback processor (IS a Module)
+                lora_attn_processor_class = LoRAAttnProcessor
+                unet_lora_attn_procs[name] = lora_attn_processor_class(
+                    hidden_size=hidden_size, 
+                    cross_attention_dim=cross_attention_dim, 
+                    rank=lora_rank
+                )
+    
+    # Set the processors *after* the loop
     unet.set_attn_processor(unet_lora_attn_procs)
 
     # 2. Correctly gather parameters
-
+    
     # 2a. Gather parameters from Module-based processors (like LoRAAttnAddedKVProcessor)
     module_attn_procs = {k: v for k, v in unet.attn_processors.items() if isinstance(v, torch.nn.Module)}
     unet_lora_layers = AttnProcsLayers(module_attn_procs)
     
-    # *** FIX 1: Move the new module to the correct device and dtype ***
+    # Move the new module to the correct device and dtype
     unet_lora_layers.to(device, dtype=unet.dtype) 
 
     # 2b. Gather ALL LoRA parameters
@@ -184,7 +227,7 @@ def train_lora(
         eps=1e-08,
     )
     
-    # *** FIX 2: Create the learning rate scheduler ***
+    # 4. Create the learning rate scheduler
     lr_scheduler = get_scheduler(
         "constant",
         optimizer=optimizer,
@@ -192,11 +235,12 @@ def train_lora(
         num_training_steps=lora_steps,
     )
 
-    # *** FIX 3: Prepare ALL models, optimizer, and scheduler with accelerate ***
-    # This single call replaces the separate prepare_model/optimizer/scheduler lines
+    # 5. Prepare ALL models, optimizer, and scheduler with accelerate
     unet, unet_lora_layers, optimizer, lr_scheduler = accelerator.prepare(
         unet, unet_lora_layers, optimizer, lr_scheduler
     )
+
+    # SDXL Change: Get dual text embeddings
     with torch.no_grad():
         prompt_embeds, pooled_prompt_embeds = encode_prompt_xl(
             text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
@@ -206,15 +250,19 @@ def train_lora(
     add_time_ids = get_add_time_ids(
         (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, device=device
     )
-    added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
     
+    # We must batch the embeds and time_ids for the training loop
+    bsz = 1 # Assuming batch size of 1 for LoRA training
+    added_cond_kwargs = {"text_embeds": pooled_prompt_embeds.repeat(bsz, 1), "time_ids": add_time_ids.repeat(bsz, 1)}
+    prompt_embeds = prompt_embeds.repeat(bsz, 1, 1)
+
     if type(image) == np.ndarray:
         image = Image.fromarray(image)
         
     # SDXL Change: Resize to 1024
     image_transforms = transforms.Compose(
         [
-            transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILNEAR),
             transforms.CenterCrop(1024),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
@@ -223,20 +271,20 @@ def train_lora(
     image = image_transforms(image).to(device)
     image = image.unsqueeze(dim=0)
     
-    # SDXL: VAE in fp16
+    # SDXL: VAE in correct dtype
     with torch.no_grad():
-        latents_dist = vae.encode(image.to(dtype=torch.bfloat16)).latent_dist
+        latents_dist = vae.encode(image.to(dtype=unet.dtype)).latent_dist
 
     # Training loop
     for _ in progress.tqdm(range(lora_steps), desc="Training LoRA..."):
-        unet.train()
+        # unet.train() # accelerator.prepare() handles this
         model_input = latents_dist.sample() * vae.config.scaling_factor
         
-        # SDXL: Cast model_input to fp16
-        model_input = model_input.to(dtype=torch.bfloat16)
+        # SDXL: Cast model_input to correct dtype
+        model_input = model_input.to(dtype=unet.dtype)
 
         noise = torch.randn_like(model_input)
-        bsz, channels, height, width = model_input.shape
+        # bsz already defined
         timesteps = torch.randint(
             0, noise_scheduler.config.num_train_timesteps, (bsz,), device=model_input.device
         ).long()
@@ -266,6 +314,10 @@ def train_lora(
         optimizer.zero_grad()
 
     # (Saving logic is identical)
+    # We must unwrap the models before saving
+    unet = accelerator.unwrap_model(unet)
+    unet_lora_layers = accelerator.unwrap_model(unet_lora_layers)
+    
     LoraLoaderMixin.save_lora_weights(
         save_directory=save_lora_dir,
         unet_lora_layers=unet_lora_layers,
