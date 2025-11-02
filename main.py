@@ -81,7 +81,7 @@ os.makedirs(args.output_path, exist_ok=True)
 
 # SDXL Change: Use fp16 for faster inference
 pipeline = DiffMorpherPipelineXL.from_pretrained(
-    args.model_path, torch_dtype=torch.bfloat16
+    args.model_path, dtype=torch.bfloat16
 )
 pipeline.to("cuda")
 
