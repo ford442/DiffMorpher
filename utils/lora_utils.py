@@ -176,7 +176,7 @@ def train_lora(
             )
         
         # This is for SDXL SELF-ATTENTION
-       else:
+        else:
             # ALWAYS use LoRAAttnProcessor. It IS a module and works.
             lora_attn_processor_class = LoRAAttnProcessor
             unet_lora_attn_procs[name] = lora_attn_processor_class(
