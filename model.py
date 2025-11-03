@@ -403,9 +403,9 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 weight_name = f"{output_path.split('/')[-1]}_lora_1_xl.ckpt" # SDXL Change
                 load_lora_path_1 = save_lora_dir + "/" + weight_name
                 if not os.path.exists(load_lora_path_1):
-                    train_lora(    image=img_1,     prompt=prompt_1,     save_lora_dir=save_lora_dir,     text_encoder=self.text_encoder, 
-                        text_encoder_2=self.text_encoder_2,     tokenizer=self.tokenizer,     tokenizer_2=self.tokenizer_2,     vae=self.vae,     unet=self.unet, 
-                        noise_scheduler=self.scheduler,     lora_steps=lora_steps,     lora_lr=lora_lr,     lora_rank=lora_rank,     weight_name=weight_name)
+                    train_lora(image=img_1, prompt=prompt_1, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
+                        text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, unet=self.unet, 
+                        lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=weight_name)
 
             lora_1 = torch.load(load_lora_path_1, map_location="cpu")
         else:
