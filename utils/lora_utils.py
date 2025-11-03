@@ -158,7 +158,8 @@ def train_lora(
         else:
             hidden_size = unet.config.block_out_channels[0]
 
-        # This is for SDXL CROSS-ATTENTION
+        # This is for SDXL CROSS-ATTENTION (is a torch.nn.Module)
+        # Takes hidden_size in __init__
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
             
@@ -170,15 +171,13 @@ def train_lora(
             # Set attributes *after* initialization
             processor.rank = lora_rank
             processor.cross_attention_dim = cross_attention_dim
+
             unet_lora_attn_procs[name] = processor
         
-        # This is for SDXL SELF-ATTENTION
+        # This is for SDXL SELF-ATTENTION (is a torch.nn.Module)
         else:
-            # Use the modern, non-module processor
-            if hasattr(F, "scaled_dot_product_attention"):
-                lora_attn_processor_class = LoRAAttnProcessor2_0
-            else:
-                lora_attn_processor_class = LoRAAttnProcessor
+            # We MUST use LoRAAttnProcessor (it's a module)
+            lora_attn_processor_class = LoRAAttnProcessor
     
             # Initialize with NO arguments
             processor = lora_attn_processor_class() 
@@ -189,17 +188,20 @@ def train_lora(
     
             unet_lora_attn_procs[name] = processor
     
-    # This call INJECTS the lora parameters into the unet
     unet.set_attn_processor(unet_lora_attn_procs)
 
-    # --- 2. Correctly gather parameters (NEW WAY) ---
-    # We no longer use AttnProcsLayers
-    params_to_optimize = []
-    for name, param in unet.named_parameters():
-        if "lora" in name:
-            params_to_optimize.append(param)
+    # --- 2. Correctly gather parameters (using AttnProcsLayers) ---
+    # This will now succeed because all processors are nn.Module subclasses
+    unet_lora_layers = AttnProcsLayers(unet.attn_processors)
+    
+    # Move the new module to the correct device and dtype
+    unet_lora_layers.to(device, dtype=unet.dtype) 
+
+    # Get parameters ONLY from this new module.
+    params_to_optimize = list(unet_lora_layers.parameters())
 
     if not params_to_optimize:
+            # This error should not be hit now.
             raise ValueError("No LoRA parameters found to optimize. "
                              "This is a critical error in the LoRA setup.")
 
@@ -220,13 +222,12 @@ def train_lora(
         num_training_steps=lora_steps,
     )
 
-    # --- 5. Prepare with accelerate (NEW WAY) ---
-    # We prepare the UNET itself, which now contains the LoRA params
-    unet, optimizer, lr_scheduler = accelerator.prepare(
-        unet, optimizer, lr_scheduler
+    # --- 5. Prepare with accelerate (ONLY the trainable module) ---
+    unet_lora_layers, optimizer, lr_scheduler = accelerator.prepare(
+        unet_lora_layers, optimizer, lr_scheduler
     )
 
-    # --- 6. Get embeddings and conditioning (remains the same) ---
+    # --- 6. Get embeddings and conditioning ---
     with torch.no_grad():
         prompt_embeds, pooled_prompt_embeds = encode_prompt_xl(
             text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
@@ -257,7 +258,7 @@ def train_lora(
     with torch.no_grad():
         latents_dist = vae.encode(image.to(dtype=unet.dtype)).latent_dist
 
-    # --- 7. Training loop (remains the same) ---
+    # --- 7. Training loop ---
     for _ in progress.tqdm(range(lora_steps), desc="Training LoRA..."):
         model_input = latents_dist.sample() * vae.config.scaling_factor
         model_input = model_input.to(dtype=unet.dtype)
@@ -289,13 +290,12 @@ def train_lora(
         lr_scheduler.step()
         optimizer.zero_grad()
 
-    # --- 8. Save weights (NEW WAY) ---
-    unet = accelerator.unwrap_model(unet)
+    # --- 8. Save weights ---
+    unet_lora_layers = accelerator.unwrap_model(unet_lora_layers)
     
-    # We pass the unet's attention processors to the save helper
     LoraLoaderMixin.save_lora_weights(
         save_directory=save_lora_dir,
-        unet_lora_layers=unet.attn_processors,
+        unet_lora_layers=unet_lora_layers,
         text_encoder_lora_layers=None,
         weight_name=weight_name,
         safe_serialization=safe_serialization
