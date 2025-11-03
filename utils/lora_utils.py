@@ -126,8 +126,8 @@ def train_lora(
       text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", revision=None, torch_dtype=weight_dtype)
   if vae is None:
       vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None, torch_dtype=weight_dtype)
-  if unet is None:
-      unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None, torch_dtype=weight_dtype)
+  #if unet is None:
+  unet = UNet2DConditionModel.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="unet", revision=None, torch_dtype=weight_dtype)
   #if noise_scheduler is None:
   noise_scheduler = DDPMScheduler.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="scheduler")
 
