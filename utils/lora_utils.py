@@ -113,6 +113,7 @@ def train_lora(
 
   accelerator = Accelerator(gradient_accumulation_steps=1)
   set_seed(0)
+  weight_dtype = torch.bfloat16
 
   # (Model loading logic remains the same)
   if tokenizer is None:
@@ -120,13 +121,13 @@ def train_lora(
   if tokenizer_2 is None:
       tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer_2", revision=None)
   if text_encoder is None:
-      text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", revision=None)
+      text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", revision=None, torch_dtype=weight_dtype)
   if text_encoder_2 is None:
-      text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", revision=None)
+      text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", revision=None, torch_dtype=weight_dtype)
   if vae is None:
-      vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None)
+      vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None, torch_dtype=weight_dtype)
   if unet is None:
-      unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None)
+      unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None, torch_dtype=weight_dtype)
   if noise_scheduler is None:
       noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
@@ -219,7 +220,7 @@ def train_lora(
   image = image.unsqueeze(dim=0)
   
   with torch.no_grad():
-      latents_dist = vae.encode(image.to(dtype=unet.dtype)).latent_dist
+      latents_dist = vae.encode(image.to(dtype=weight_dtype)).latent_dist
 
   # 8. Set unet to train mode
   unet.train()
