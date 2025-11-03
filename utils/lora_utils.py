@@ -194,7 +194,8 @@ def train_lora(
             processor.cross_attention_dim = cross_attention_dim 
     
             unet_lora_attn_procs[name] = processor
-    
+            
+    unet.train()
     # This call INJECTS the lora parameters into the unet
     unet.set_attn_processor(unet_lora_attn_procs)
 
@@ -202,7 +203,6 @@ def train_lora(
     # We no longer use AttnProcsLayers
     
     # Set unet to train mode
-    unet.train()
     
     params_to_optimize = []
     for name, param in unet.named_parameters():
