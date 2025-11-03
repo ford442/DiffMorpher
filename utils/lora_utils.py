@@ -129,7 +129,7 @@ def train_lora(
   if unet is None:
       unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None, torch_dtype=weight_dtype)
   #if noise_scheduler is None:
-  noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
+  noise_scheduler = DDPMScheduler.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="scheduler")
 
 
   device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
