@@ -13,7 +13,7 @@ from accelerate.utils import set_seed
 from packaging import version
 from PIL import Image
 import tqdm
-from diffusers.models.lora import LoraConfig
+from peft import LoraConfig
 
 from transformers import AutoTokenizer, PretrainedConfig, CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
