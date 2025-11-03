@@ -150,17 +150,19 @@ def train_lora(
     # --- 1. Correctly instantiate all LoRA processors ---
     unet_lora_attn_procs = {}
     for name, attn_processor in unet.attn_processors.items():
-        cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
-        if name.startswith("mid_block"):
-            hidden_size = unet.config.block_out_channels[-1]
-        elif name.startswith("up_blocks"):
-            block_id = int(name[len("up_blocks.")])
-            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
-        elif name.startswith("down_blocks"):
-            block_id = int(name[len("down_blocks.")])
-            hidden_size = unet.config.block_out_channels[block_id]
-        else:
-            hidden_size = unet.config.block_out_channels[0]
+        # The logic to determine hidden_size is no longer needed for instantiation,
+        # but we'll keep it here commented out for context, as it was part of the original script.
+        # cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+        # if name.startswith("mid_block"):
+        #   hidden_size = unet.config.block_out_channels[-1]
+        # elif name.startswith("up_blocks"):
+        #   block_id = int(name[len("up_blocks.")])
+        #   hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+        # elif name.startswith("down_blocks"):
+        #   block_id = int(name[len("down_blocks.")])
+        #   hidden_size = unet.config.block_out_channels[block_id]
+        # else:
+        #   hidden_size = unet.config.block_out_channels[0]
 
         # --- THIS IS THE FIX ---
         # Determine the correct LoRA processor class
@@ -172,23 +174,15 @@ def train_lora(
             else:
                 lora_attn_processor_class = LoRAAttnProcessor
 
-        # Instantiate the processor with all required arguments
-        # (Based on diffusers 0.25.0+ source)
+        # Instantiate the processor with just the rank.
+        # The other dimensions are inferred internally by diffusers.
         unet_lora_attn_procs[name] = lora_attn_processor_class(
-            hidden_size=hidden_size,
-            cross_attention_dim=cross_attention_dim,
             rank=lora_rank
         )
-            
-    unet.train()
+
     # This call INJECTS the lora parameters into the unet
     unet.set_attn_processor(unet_lora_attn_procs)
-
-    # --- 2. Correctly gather parameters (Modern Way) ---
-    # We no longer use AttnProcsLayers
-    
-    # Set unet to train mode
-    
+    unet.train() # Set unet to train mode after injecting LoRA layers
     params_to_optimize = []
     for name, param in unet.named_parameters():
         if "lora" in name:
