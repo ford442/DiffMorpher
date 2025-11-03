@@ -148,7 +148,7 @@ def train_lora(
     # --- END FIX ---
 
     # --- 1. Correctly instantiate all LoRA processors ---
-    unet_lora_attn_procs = {}
+        unet_lora_attn_procs = {}
     for name, attn_processor in unet.attn_processors.items():
         cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
         if name.startswith("mid_block"):
@@ -162,38 +162,23 @@ def train_lora(
         else:
             hidden_size = unet.config.block_out_channels[0]
 
-        # This is for SDXL CROSS-ATTENTION
-        # Takes hidden_size in __init__
+        # --- THIS IS THE FIX ---
+        # Determine the correct LoRA processor class
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
-            
-            # Instantiate with ONLY hidden_size
-            processor = lora_attn_processor_class(
-                hidden_size=hidden_size
-            )
-            
-            # Set attributes *after* initialization
-            processor.rank = lora_rank
-            processor.cross_attention_dim = cross_attention_dim
-
-            unet_lora_attn_procs[name] = processor
-        
-        # This is for SDXL SELF-ATTENTION
         else:
-            # Use the modern, non-module processor
             if hasattr(F, "scaled_dot_product_attention"):
                 lora_attn_processor_class = LoRAAttnProcessor2_0
             else:
                 lora_attn_processor_class = LoRAAttnProcessor
-    
-            # Initialize with NO arguments
-            processor = lora_attn_processor_class() 
-    
-            # Set attributes *after* initialization
-            processor.rank = lora_rank
-            processor.cross_attention_dim = cross_attention_dim 
-    
-            unet_lora_attn_procs[name] = processor
+
+        # Instantiate the processor with all required arguments
+        # (Based on diffusers 0.25.0+ source)
+        unet_lora_attn_procs[name] = lora_attn_processor_class(
+            hidden_size=hidden_size,
+            cross_attention_dim=cross_attention_dim,
+            rank=lora_rank
+        )
             
     unet.train()
     # This call INJECTS the lora parameters into the unet
