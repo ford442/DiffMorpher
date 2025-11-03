@@ -133,12 +133,12 @@ def train_lora(
 
   device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
   
-  unet_dtype = unet.dtype
+  unet_dtype = weight_dtype
 
-  vae.to(device, dtype=unet_dtype)
+  vae.to(device, weight_dtype)
   text_encoder.to(device)
   text_encoder_2.to(device)
-  unet.to(device, dtype=unet_dtype)
+  unet.to(device, weight_dtype)
 
   # --- THIS IS THE FIX ---
   # 1. Freeze all parameters in the UNet before adding the adapter
