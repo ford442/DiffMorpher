@@ -145,34 +145,50 @@ def train_lora(
 
     # --- 1. Correctly instantiate all LoRA processors ---
     
+    # --- 1. Correctly instantiate all LoRA processors ---
     unet_lora_attn_procs = {}
-    
-    # Use the correct LoRA processor class (this is an nn.Module)
-    lora_attn_processor_class = LoRAAttnAddedKVProcessor
-    
     for name, attn_processor in unet.attn_processors.items():
-        # Determine cross_attention_dim
         cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
-        
-        # We no longer need hidden_size for instantiation
-        # if name.startswith("mid_block"):
-        #     hidden_size = unet.config.block_out_channels[-1]
-        # ... (rest of hidden_size logic removed)
+        if name.startswith("mid_block"):
+            hidden_size = unet.config.block_out_channels[-1]
+        elif name.startswith("up_blocks"):
+            block_id = int(name[len("up_blocks.")])
+            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+        elif name.startswith("down_blocks"):
+            block_id = int(name[len("down_blocks.")])
+            hidden_size = unet.config.block_out_channels[block_id]
+        else:
+            hidden_size = unet.config.block_out_channels[0]
 
-        # *** THIS IS THE FIX ***
-        # Based on all previous TypeErrors, the constructor likely ONLY takes rank.
-        # We will instantiate with rank, then set other attributes manually.
-        
-        # 1. Instantiate with only the rank
-        processor = lora_attn_processor_class(
-            rank=lora_rank
-        )
-        
-        # 2. Set cross_attention_dim manually after instantiation
-        #    This will be None for self-attn and a value for cross-attn
-        processor.cross_attention_dim = cross_attention_dim
-        
-        unet_lora_attn_procs[name] = processor
+        # This is for SDXL CROSS-ATTENTION (is a torch.nn.Module)
+        # Based on errors, it *only* takes hidden_size
+        if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
+            lora_attn_processor_class = LoRAAttnAddedKVProcessor
+
+            # Instantiate with ONLY hidden_size
+            processor = lora_attn_processor_class(
+                hidden_size=hidden_size
+            )
+
+            # Set attributes *after* initialization
+            processor.rank = lora_rank
+            processor.cross_attention_dim = cross_attention_dim
+
+            unet_lora_attn_procs[name] = processor
+
+        # This is for SDXL SELF-ATTENTION (is a torch.nn.Module)
+        else:
+            # We MUST use LoRAAttnProcessor because it IS a nn.Module.
+            lora_attn_processor_class = LoRAAttnProcessor
+
+            # Initialize with NO arguments
+            processor = lora_attn_processor_class() 
+
+            # Set attributes *after* initialization
+            processor.rank = lora_rank
+            processor.cross_attention_dim = cross_attention_dim 
+
+            unet_lora_attn_procs[name] = processor
         
     unet.set_attn_processor(unet_lora_attn_procs)
 
