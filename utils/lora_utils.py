@@ -141,9 +141,11 @@ def train_lora(
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     text_encoder_2.requires_grad_(False)
-    # UNet must be trainable to accept injected LoRA parameters
+    
+    # --- THIS IS THE FIX ---
+    # U-Net's grads must be ON to train the injected LoRA parameters
     unet.requires_grad_(True) 
-
+    # --- END FIX ---
 
     # --- 1. Correctly instantiate all LoRA processors ---
     unet_lora_attn_procs = {}
@@ -161,7 +163,7 @@ def train_lora(
             hidden_size = unet.config.block_out_channels[0]
 
         # This is for SDXL CROSS-ATTENTION
-        # Use LoRAAttnAddedKVProcessor, which is NOT a module
+        # Takes hidden_size in __init__
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
             
@@ -196,15 +198,20 @@ def train_lora(
     # This call INJECTS the lora parameters into the unet
     unet.set_attn_processor(unet_lora_attn_procs)
 
-    # --- 2. Correctly gather parameters (NEW WAY) ---
+    # --- 2. Correctly gather parameters (Modern Way) ---
     # We no longer use AttnProcsLayers
+    
+    # Set unet to train mode
+    unet.train()
     
     params_to_optimize = []
     for name, param in unet.named_parameters():
         if "lora" in name:
+            param.requires_grad = True # Ensure they are trainable
             params_to_optimize.append(param)
 
     if not params_to_optimize:
+            # This error will not be hit if unet.requires_grad_(True) is set
             raise ValueError("No LoRA parameters found to optimize. "
                              "This is a critical error in the LoRA setup.")
 
@@ -225,7 +232,7 @@ def train_lora(
         num_training_steps=lora_steps,
     )
 
-    # --- 5. Prepare with accelerate (NEW WAY) ---
+    # --- 5. Prepare with accelerate (Modern Way) ---
     # We prepare the UNET itself, which now contains the LoRA params
     unet, optimizer, lr_scheduler = accelerator.prepare(
         unet, optimizer, lr_scheduler
@@ -294,7 +301,7 @@ def train_lora(
         lr_scheduler.step()
         optimizer.zero_grad()
 
-    # --- 8. Save weights (NEW WAY) ---
+    # --- 8. Save weights (Modern Way) ---
     unet = accelerator.unwrap_model(unet)
     
     # We pass the unet's attention processors (the dict) to the save helper
