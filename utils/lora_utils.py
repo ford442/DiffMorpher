@@ -102,14 +102,14 @@ def get_add_time_ids(original_size, crops_coords_top_left, target_size, dtype, d
 # --- THIS IS THE FULLY CORRECTED FUNCTION ---
 #
 def train_lora(
-    image, prompt, save_lora_dir, model_path=None,
-    text_encoder=None, text_encoder_2=None,
-    tokenizer=None, tokenizer_2=None,
-    vae=None, unet=None, noise_scheduler=None,
-    lora_steps=200, lora_lr=2e-4, lora_rank=16,
+    image, prompt, save_lora_dir, model_path=None, 
+    text_encoder=None, text_encoder_2=None, 
+    tokenizer=None, tokenizer_2=None, 
+    vae=None, unet=None, noise_scheduler=None, 
+    lora_steps=200, lora_lr=2e-4, lora_rank=16, 
     weight_name=None, safe_serialization=False, progress=tqdm
 ):
-
+    
     accelerator = Accelerator(gradient_accumulation_steps=1)
     set_seed(0)
 
@@ -130,21 +130,19 @@ def train_lora(
         noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-    unet_dtype = unet.dtype
-
+    
+    unet_dtype = unet.dtype 
+    
     vae.to(device, dtype=unet_dtype)
     text_encoder.to(device)
     text_encoder_2.to(device)
-    unet.to(device, dtype=unet_dtype)
+    unet.to(device, dtype=unet_dtype) 
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
 
-    # --- 1. Correctly instantiate all LoRA processors ---
-    
     # --- 1. Correctly instantiate all LoRA processors ---
     unet_lora_attn_procs = {}
     for name, attn_processor in unet.attn_processors.items():
@@ -160,47 +158,46 @@ def train_lora(
         else:
             hidden_size = unet.config.block_out_channels[0]
 
-        # This is for SDXL CROSS-ATTENTION (is a torch.nn.Module)
-        # Based on errors, it *only* takes hidden_size
+        # This is for SDXL CROSS-ATTENTION
         if isinstance(attn_processor, (AttnAddedKVProcessor, SlicedAttnAddedKVProcessor, AttnAddedKVProcessor2_0)):
             lora_attn_processor_class = LoRAAttnAddedKVProcessor
-
+            
             # Instantiate with ONLY hidden_size
             processor = lora_attn_processor_class(
                 hidden_size=hidden_size
             )
-
+            
             # Set attributes *after* initialization
             processor.rank = lora_rank
             processor.cross_attention_dim = cross_attention_dim
-
             unet_lora_attn_procs[name] = processor
-
-        # This is for SDXL SELF-ATTENTION (is a torch.nn.Module)
+        
+        # This is for SDXL SELF-ATTENTION
         else:
-            # We MUST use LoRAAttnProcessor because it IS a nn.Module.
-            lora_attn_processor_class = LoRAAttnProcessor
-
+            # Use the modern, non-module processor
+            if hasattr(F, "scaled_dot_product_attention"):
+                lora_attn_processor_class = LoRAAttnProcessor2_0
+            else:
+                lora_attn_processor_class = LoRAAttnProcessor
+    
             # Initialize with NO arguments
             processor = lora_attn_processor_class() 
-
+    
             # Set attributes *after* initialization
             processor.rank = lora_rank
             processor.cross_attention_dim = cross_attention_dim 
-
+    
             unet_lora_attn_procs[name] = processor
-        
+    
+    # This call INJECTS the lora parameters into the unet
     unet.set_attn_processor(unet_lora_attn_procs)
 
-    # --- 2. Correctly gather parameters ---
-    # This line will now succeed
-    unet_lora_layers = AttnProcsLayers(unet.attn_processors)
-    
-    # Move the new module to the correct device and dtype
-    unet_lora_layers.to(device, dtype=unet.dtype) 
-
-    # Get parameters ONLY from this new module.
-    params_to_optimize = list(unet_lora_layers.parameters())
+    # --- 2. Correctly gather parameters (NEW WAY) ---
+    # We no longer use AttnProcsLayers
+    params_to_optimize = []
+    for name, param in unet.named_parameters():
+        if "lora" in name:
+            params_to_optimize.append(param)
 
     if not params_to_optimize:
             raise ValueError("No LoRA parameters found to optimize. "
@@ -223,9 +220,10 @@ def train_lora(
         num_training_steps=lora_steps,
     )
 
-    # --- 5. Prepare with accelerate (ONLY the trainable module) ---
-    unet_lora_layers, optimizer, lr_scheduler = accelerator.prepare(
-        unet_lora_layers, optimizer, lr_scheduler
+    # --- 5. Prepare with accelerate (NEW WAY) ---
+    # We prepare the UNET itself, which now contains the LoRA params
+    unet, optimizer, lr_scheduler = accelerator.prepare(
+        unet, optimizer, lr_scheduler
     )
 
     # --- 6. Get embeddings and conditioning (remains the same) ---
@@ -291,12 +289,13 @@ def train_lora(
         lr_scheduler.step()
         optimizer.zero_grad()
 
-    # --- 8. Save weights (remains the same) ---
-    unet_lora_layers = accelerator.unwrap_model(unet_lora_layers)
+    # --- 8. Save weights (NEW WAY) ---
+    unet = accelerator.unwrap_model(unet)
     
+    # We pass the unet's attention processors to the save helper
     LoraLoaderMixin.save_lora_weights(
         save_directory=save_lora_dir,
-        unet_lora_layers=unet_lora_layers,
+        unet_lora_layers=unet.attn_processors,
         text_encoder_lora_layers=None,
         weight_name=weight_name,
         safe_serialization=safe_serialization
