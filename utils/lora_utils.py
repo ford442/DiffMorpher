@@ -106,7 +106,7 @@ def train_lora(
   image, prompt, save_lora_dir, model_path=None,
   text_encoder=None, text_encoder_2=None,
   tokenizer=None, tokenizer_2=None,
-  vae=None, unet=None, noise_scheduler=None,
+  vae=None, unet=None, # <--- noise_scheduler IS REMOVED
   lora_steps=200, lora_lr=2e-4, lora_rank=16,
   weight_name=None, safe_serialization=False, progress=tqdm
 ):
@@ -128,8 +128,9 @@ def train_lora(
       vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None, torch_dtype=weight_dtype)
   if unet is None:
       unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", revision=None, torch_dtype=weight_dtype)
-  if noise_scheduler is None:
-      noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
+  #if noise_scheduler is None:
+  noise_scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
+
 
   device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
   
