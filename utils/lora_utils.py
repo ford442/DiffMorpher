@@ -148,7 +148,7 @@ def train_lora(
     # --- END FIX ---
 
     # --- 1. Correctly instantiate all LoRA processors ---
-        unet_lora_attn_procs = {}
+    unet_lora_attn_procs = {}
     for name, attn_processor in unet.attn_processors.items():
         cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
         if name.startswith("mid_block"):
