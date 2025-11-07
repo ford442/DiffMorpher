@@ -51,10 +51,10 @@ def get_add_time_ids(original_size, crops_coords_top_left, target_size, dtype, d
 
 
 def train_lora_xl(
-    image, prompt, save_lora_dir,
+    image, prompt,
     unet, vae, text_encoder, text_encoder_2, tokenizer, tokenizer_2,
     lora_steps=200, lora_lr=2e-4, lora_rank=16,
-    weight_name="lora.safetensors",
+    save_path=None, # CHANGED: We now take a single path for the save directory
 ):
     # --- Basic Setup ---
     set_seed(42)
@@ -153,10 +153,10 @@ def train_lora_xl(
         save_path = os.path.join(save_lora_dir, weight_name)
     
         # Use the official diffusers save method
-        unet.save_attn_procs(save_lora_dir, weight_name=weight_name, safe_serialization=True, state_dict=lora_state_dict)
+        unet.save_pretrained(save_path)
 
         print(f"LoRA saved to {save_path}")
     finally:
         if "default" in unet.peft_config:
-            unet.delete_adapters(["default"]) # <--- THIS IS THE CORRECTED LINE
+            unet.delete_adapters(["default"])
             print("Cleaned up temporary training adapter.")
