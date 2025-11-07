@@ -172,7 +172,7 @@ def train_lora(
       )
     add_time_ids = get_add_time_ids(
       (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, device=device
-  )
+      )
   bsz = 1
   added_cond_kwargs = {"text_embeds": pooled_prompt_embeds.repeat(bsz, 1), "time_ids": add_time_ids.repeat(bsz, 1)}
   prompt_embeds = prompt_embeds.repeat(bsz, 1, 1)
