@@ -123,7 +123,7 @@ def train_lora_xl(
 
         # --- Training Loop ---
 
-        progress_bar = tqdm(range(lora_steps), desc=f"Training {weight_name}")
+        progress_bar = tqdm(range(lora_steps), desc=f"Training LoRA for {os.path.basename(save_path)}")
         for step in range(lora_steps):
             with accelerator.accumulate(unet):
                 noise = torch.randn_like(latents)
