@@ -389,11 +389,14 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2,
                     lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank
                 )
+                prefixed_lora_state_dict = {f"unet.{k}": v for k, v in lora_state_dict.items()}
+                # 3. Use the pipeline's save method with the CORRECTLY PREFIXED dictionary.
                 self.save_lora_weights(
                     save_directory=final_lora_path_0,
-                    unet_lora_layers=lora_state_dict
+                    unet_lora_layers=prefixed_lora_state_dict  # Pass the prefixed one
                 )
                 print(f"LoRA for image 0 saved to {final_lora_path_0}")
+
             # --- Handle LoRA for Image 1 ---
             lora_dir_name_1 = f"{os.path.splitext(os.path.basename(img_path_1))[0]}_lora"
             final_lora_path_1 = os.path.join(save_lora_dir, lora_dir_name_1)
@@ -407,11 +410,13 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2,
                     lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank
                 )
+                prefixed_lora_state_dict = {f"unet.{k}": v for k, v in lora_state_dict.items()}
                 self.save_lora_weights(
                     save_directory=final_lora_path_1,
-                    unet_lora_layers=lora_state_dict
+                    unet_lora_layers=prefixed_lora_state_dict
                 )
                 print(f"LoRA for image 1 saved to {final_lora_path_1}")
+
 
             # --- THE FIX: Load from the directories ---
             print("Loading and fusing LoRA adapters...")
