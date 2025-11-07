@@ -391,7 +391,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         
         if self.use_lora:
             # Set adapter to fully use lora_1 for the second image inversion
-            self.set_adapters(["lora_1"], adapter_weights=[1.0])  10 
+            self.set_adapters(["lora_1"], adapter_weights=[1.0])
         img_noise_1 = self.ddim_inversion(
             self.image2latent(img_1), prompt_embeds_1, pooled_embeds_1)
 
