@@ -343,7 +343,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
         return prompt_embeds, pooled_embeds # Return two sets of embeddings
 
-def __call__(
+    def __call__(
             self,
             img_0=None,
             img_1=None,
