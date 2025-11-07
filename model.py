@@ -281,13 +281,10 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         
         if use_lora:
             if fix_lora is not None:
-                # Fix LoRA to A (0) or B (1)
-                adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
-                self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
+                self.unet = load_lora(self.unet, lora_0, lora_1, fix_lora)
             else:
-                # Interpolate between LoRA A and B using alpha
-                self.unet.set_adapters(["lora_0", "lora_1"], adapter_weights=[1-alpha, alpha])
-
+                self.unet = load_lora(self.unet, lora_0, lora_1, alpha)
+                
         for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha}")):
             if guidance_scale > 1.:
                 model_inputs = torch.cat([latents] * 2)
@@ -391,36 +388,27 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         if self.use_lora:
             print("Loading lora...")
             
-            # --- START OF CHANGES ---
+            if not load_lora_path_0:
+                weight_name = f"{output_path.split('/')[-1]}_lora_0_xl.ckpt" # SDXL Change
+                load_lora_path_0 = save_lora_dir + "/" + weight_name
+                if not os.path.exists(load_lora_path_0):
+                    train_lora( image=img_0, prompt=prompt_0, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
+                        text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, 
+                        unet=self.unet, lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=weight_name)
             
-            # Define the adapter names based on your convention
-            adapter_name_0 = f"{output_path.split('/')[-1]}_lora_0_xl.ckpt"
-            adapter_name_1 = f"{output_path.split('/')[-1]}_lora_1_xl.ckpt"
-            
-            # Define the full path to the adapter *directory*
-            lora_path_0 = os.path.join(save_lora_dir, adapter_name_0)
-            lora_path_1 = os.path.join(save_lora_dir, adapter_name_1)
+            # This is the "old way" of loading
+            lora_0 = torch.load(load_lora_path_0, map_location="cpu")
 
-            # Train if the adapter directory doesn't exist
-            if not os.path.exists(lora_path_0):
-                train_lora( image=img_0, prompt=prompt_0, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
-                    text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, 
-                    unet=self.unet, lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=adapter_name_0)
-            
-            if not os.path.exists(lora_path_1):
-                train_lora(image=img_1, prompt=prompt_1, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
-                    text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, unet=self.unet, 
-                    lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=adapter_name_1)
+            if not load_lora_path_1:
+                weight_name = f"{output_path.split('/')[-1]}_lora_1_xl.ckpt" # SDXL Change
+                load_lora_path_1 = save_lora_dir + "/" + weight_name
+                if not os.path.exists(load_lora_path_1):
+                    train_lora(image=img_1, prompt=prompt_1, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
+                        text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, unet=self.unet, 
+                        lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=weight_name)
 
-            # Load both LoRAs using load_adapter
-            print(f"Loading LoRA 0 from: {lora_path_0}")
-            self.unet.load_adapter(lora_path_0, adapter_name="lora_0")
-            print(f"Loading LoRA 1 from: {lora_path_1}")
-            self.unet.load_adapter(lora_path_1, adapter_name="lora_1")
-            
-            # --- END OF CHANGES ---
-            
-            lora_0 = lora_1 = None # Set to None, as they are no longer needed
+            # This is the "old way" of loading
+            lora_1 = torch.load(load_lora_path_1, map_location="cpu")
             
         # SDXL Change: Get both sets of embeddings
         prompt_embeds_0, pooled_embeds_0 = self.get_text_embeddings(
@@ -432,14 +420,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         img_1 = get_img(img_1) # Uses get_img from model_utils_xl (1024)
         
         if self.use_lora:
-            # Set adapter to lora_0 (alpha=0)
-            self.unet.set_adapters(["lora_0"], adapter_weights=[1.0])
+            self.unet = load_lora(self.unet, lora_0, lora_1, 0 if fix_lora is None else fix_lora)
         img_noise_0 = self.ddim_inversion(
             self.image2latent(img_0), prompt_embeds_0, pooled_embeds_0) # SDXL Change
         
         if self.use_lora:
-            # Set adapter to lora_1 (alpha=1)
-            self.unet.set_adapters(["lora_1"], adapter_weights=[1.0])
+            self.unet = load_lora(self.unet, lora_0, lora_1, 1 if fix_lora is None else fix_lora)
         img_noise_1 = self.ddim_inversion(
             self.image2latent(img_1), prompt_embeds_1, pooled_embeds_1) # SDXL Change
 
@@ -487,11 +473,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
                 # (This block is also correct)
                 if self.use_lora:
-                    if fix_lora is not None:
-                        adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
-                        self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
-                    else:
-                        self.unet.set_adapters(["lora_1"], adapter_weights=[1.0]) # Set to alpha=1
+                    self.unet = load_lora(self.unet, lora_0, lora_1, alpha if fix_lora is None else fix_lora)
                 
                 # (Rest of the StoreProcessor setup is correct)
                 attn_processor_dict = {}
