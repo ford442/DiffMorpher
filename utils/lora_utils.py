@@ -127,7 +127,7 @@ def train_lora(
   text_encoder.requires_grad_(False)
   text_encoder_2.requires_grad_(False)
   unet.requires_grad_(False) # Freeze the entire UNet first
-# 2. Set up LoRA layers manually
+  # 2. Set up LoRA layers manually
   unet.train()
   unet_lora_attn_procs = {}
   
@@ -144,17 +144,24 @@ def train_lora(
       else:
           hidden_size = unet.config.block_out_channels[0] # Fallback
 
-      # Use the correct processor class for SDXL (with added KV)
+      # --- THIS IS THE FIX ---
       if cross_attention_dim is None:
+          # This is for self-attention (LoRAAttnProcessor)
+          # It only takes 'rank'
           attn_procs_class = LoRAAttnProcessor
+          unet_lora_attn_procs[name] = attn_procs_class(
+              rank=lora_rank
+          )
       else:
+          # This is for cross-attention (LoRAAttnAddedKVProcessor)
+          # It takes 'hidden_size', 'cross_attention_dim', and 'rank'
           attn_procs_class = LoRAAttnAddedKVProcessor
-          
-      unet_lora_attn_procs[name] = attn_procs_class(
-          hidden_size=hidden_size, 
-          cross_attention_dim=cross_attention_dim, 
-          rank=lora_rank
-      )
+          unet_lora_attn_procs[name] = attn_procs_class(
+              hidden_size=hidden_size, 
+              cross_attention_dim=cross_attention_dim, 
+              rank=lora_rank
+          )
+      # --- END FIX ---
   
   unet.set_attn_processor(unet_lora_attn_procs)
   
