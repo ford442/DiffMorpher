@@ -409,10 +409,11 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             # --- THE FIX: Load from the directories ---
             print("Loading and fusing LoRA adapters...")
             # The first argument is the directory path. The `weight_name` argument is no longer needed.
-            self.load_lora_weights(final_lora_path_0, adapter_name="lora_0")
-            self.load_lora_weights(final_lora_path_1, adapter_name="lora_1")
-            
-            # This line will now work because the adapters are properly registered.
+            self.unet.load_lora_weights(final_lora_path_0, adapter_name="lora_0")
+            self.unet.load_lora_weights(final_lora_path_1, adapter_name="lora_1")
+    
+            # Now, when the pipeline sets the adapters, it will find them
+            # because they have been successfully loaded onto its UNet component.
             self.set_adapters(["lora_0", "lora_1"])
             
         # SDXL Change: Get both sets of embeddings
@@ -434,7 +435,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         
         original_processor = list(self.unet.attn_processors.values())[0]
         
-        # This morph function is adapted from the original model.py
     def morph(alpha_list, progress, desc):
         """
         Generates the morphing sequence.
