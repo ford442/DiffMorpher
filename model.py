@@ -279,10 +279,14 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
         self.scheduler.set_timesteps(num_inference_steps)
         if use_lora:
-            if fix_lora is not None:
-                self.unet = load_lora(self.unet, lora_0, lora_1, fix_lora)
-            else:
-                self.unet = load_lora(self.unet, lora_0, lora_1, alpha)
+        # --- NEW WAY ---
+        if fix_lora is not None:
+            # Fix LoRA to A (0) or B (1)
+            adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
+            self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
+        else:
+            # Interpolate between LoRA A and B using alpha
+            self.unet.set_adapters(["lora_0", "lora_1"], adapter_weights=[1-alpha, alpha])
 
         for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha}")):
             if guidance_scale > 1.:
@@ -339,7 +343,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
         return prompt_embeds, pooled_embeds # Return two sets of embeddings
 
-    # SDXL Change: Main pipeline call
     def __call__(
             self,
             img_0=None,
@@ -373,18 +376,15 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             neg_prompt=None,
             save_intermediates=False,
             **kwds):
-
         self.scheduler.set_timesteps(num_inference_steps)
         self.use_lora = use_lora
         self.use_adain = use_adain
         self.use_reschedule = use_reschedule
         self.output_path = output_path
-
         if img_0 is None:
             img_0 = Image.open(img_path_0).convert("RGB")
         if img_1 is None:
             img_1 = Image.open(img_path_1).convert("RGB")
-
         if self.use_lora:
             print("Loading lora...")
             # This logic remains the same, but it will call the (new) lora_utils_xl.py
@@ -396,9 +396,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     train_lora( image=img_0, prompt=prompt_0, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
                         text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, 
                         unet=self.unet, lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=weight_name)
-            
-            lora_0 = torch.load(load_lora_path_0, map_location="cpu")
-
             if not load_lora_path_1:
                 weight_name = f"{output_path.split('/')[-1]}_lora_1_xl.ckpt" # SDXL Change
                 load_lora_path_1 = save_lora_dir + "/" + weight_name
@@ -406,43 +403,41 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     train_lora(image=img_1, prompt=prompt_1, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
                         text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, unet=self.unet, 
                         lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=weight_name)
-
-            lora_1 = torch.load(load_lora_path_1, map_location="cpu")
-        else:
-            lora_0 = lora_1 = None
-
+            # Load both LoRAs into the UNet's adapter cache
+            print(f"Loading LoRA 0 from: {load_lora_path_0}")
+            self.unet.load_lora_weights(load_lora_path_0, adapter_name="lora_0")
+            print(f"Loading LoRA 1 from: {load_lora_path_1}")
+            self.unet.load_lora_weights(load_lora_path_1, adapter_name="lora_1")
+            lora_0 = lora_1 = None # Set to None, as they are no longer needed
         # SDXL Change: Get both sets of embeddings
         prompt_embeds_0, pooled_embeds_0 = self.get_text_embeddings(
             prompt_0, guidance_scale, neg_prompt, batch_size)
         prompt_embeds_1, pooled_embeds_1 = self.get_text_embeddings(
             prompt_1, guidance_scale, neg_prompt, batch_size)
-        
         img_0 = get_img(img_0) # Uses get_img from model_utils_xl (1024)
         img_1 = get_img(img_1) # Uses get_img from model_utils_xl (1024)
-        
         if self.use_lora:
-            self.unet = load_lora(self.unet, lora_0, lora_1, 0)
+            # Set adapter to lora_0 (alpha=0)
+            self.unet.set_adapters(["lora_0"], adapter_weights=[1.0])
         img_noise_0 = self.ddim_inversion(
             self.image2latent(img_0), prompt_embeds_0, pooled_embeds_0) # SDXL Change
-        
         if self.use_lora:
-            self.unet = load_lora(self.unet, lora_0, lora_1, 1)
+            # Set adapter to lora_1 (alpha=1)
+            self.unet.set_adapters(["lora_1"], adapter_weights=[1.0])
         img_noise_1 = self.ddim_inversion(
             self.image2latent(img_1), prompt_embeds_1, pooled_embeds_1) # SDXL Change
-
         print("latents shape: ", img_noise_0.shape)
-        
         original_processor = list(self.unet.attn_processors.values())[0]
-        
         # This morph function is adapted from the original model.py
         def morph(alpha_list, progress, desc):
             images = []
             if attn_beta is not None:
                 if self.use_lora:
-                    self.unet = load_lora(
-                        self.unet, lora_0, lora_1, 0 if fix_lora is None else fix_lora)
-
-                # (Set up StoreProcessor... identical to original)
+                    if fix_lora is not None:
+                        adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
+                        self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
+                    else:
+                        self.unet.set_adapters(["lora_0"], adapter_weights=[1.0]) # Set to alpha=0
                 attn_processor_dict = {}
                 for k in self.unet.attn_processors.keys():
                     if do_replace_attn(k):
@@ -455,7 +450,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     else:
                         attn_processor_dict[k] = self.unet.attn_processors[k]
                 self.unet.set_attn_processor(attn_processor_dict)
-
                 # SDXL Change: Pass dual embeds to cal_latent
                 latents = self.cal_latent(
                     num_inference_steps, guidance_scale, unconditioning,
@@ -468,11 +462,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 first_image = Image.fromarray(first_image)
                 if save_intermediates:
                     first_image.save(f"{self.output_path}/{0:02d}.png")
-
-                # (Set up StoreProcessor for img1... identical to original)
                 if self.use_lora:
-                    self.unet = load_lora(
-                        self.unet, lora_0, lora_1, 1 if fix_lora is None else fix_lora)
+                    if fix_lora is not None:
+                        adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
+                        self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
+                    else:
+                        self.unet.set_adapters(["lora_1"], adapter_weights=[1.0]) # Set to alpha=1
                 attn_processor_dict = {}
                 for k in self.unet.attn_processors.keys():
                     if do_replace_attn(k):
@@ -485,7 +480,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     else:
                         attn_processor_dict[k] = self.unet.attn_processors[k]
                 self.unet.set_attn_processor(attn_processor_dict)
-
                 # SDXL Change: Pass dual embeds to cal_latent
                 latents = self.cal_latent(
                     num_inference_steps, guidance_scale, unconditioning,
@@ -498,15 +492,14 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 last_image = Image.fromarray(last_image)
                 if save_intermediates:
                     last_image.save(f"{self.output_path}/{num_frames - 1:02d}.png")
-
-                # Main loop
                 for i in progress.tqdm(range(1, num_frames - 1), desc=desc):
                     alpha = alpha_list[i]
                     if self.use_lora:
-                        self.unet = load_lora(
-                            self.unet, lora_0, lora_1, alpha if fix_lora is None else fix_lora)
-                    
-                    # (Set up LoadProcessor... identical to original)
+                        if fix_lora is not None:
+                            adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
+                            self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
+                        else:
+                            self.unet.set_adapters(["lora_0", "lora_1"], adapter_weights=[1-alpha, alpha])
                     attn_processor_dict = {}
                     for k in self.unet.attn_processors.keys():
                         if do_replace_attn(k):
@@ -519,7 +512,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                         else:
                             attn_processor_dict[k] = self.unet.attn_processors[k]
                     self.unet.set_attn_processor(attn_processor_dict)
-
                     # SDXL Change: Pass dual embeds to cal_latent
                     latents = self.cal_latent(
                         num_inference_steps, guidance_scale, unconditioning,
@@ -534,8 +526,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                         image.save(f"{self.output_path}/{i:02d}.png")
                     images.append(image)
                 images = [first_image] + images + [last_image]
-            
-            # (This 'else' block for no attn_beta is identical, but calls the modified cal_latent)
             else:
                 for k, alpha in enumerate(alpha_list):
                     latents = self.cal_latent(
@@ -550,10 +540,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     if save_intermediates:
                         image.save(f"{self.output_path}/{k:02d}.png")
                     images.append(image)
-
             return images
-        
-        # (Reschedule logic is identical)
         with torch.no_grad():
             if self.use_reschedule:
                 alpha_scheduler = AlphaScheduler()
@@ -570,5 +557,4 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 alpha_list = list(torch.linspace(0, 1, num_frames))
                 print(alpha_list)
                 images = morph(alpha_list, progress, "Sampling...")
-
         return images
