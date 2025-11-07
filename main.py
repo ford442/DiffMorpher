@@ -113,9 +113,9 @@ pipeline.enable_model_cpu_offload()
 # This is a bit of a hack, but simpler than refactoring model_xl.py
 import model
 # (This line was likely deleted by mistake, make sure it's present)
-model.train_lora = utils.lora_utils.train_lora
+#model.train_lora = utils.lora_utils.train_lora
 # (This line should be deleted, as it's part of the old way
-model.load_lora = utils.lora_utils.load_lora 
+#model.load_lora = utils.lora_utils.load_lora 
 
 images = pipeline(
     img_path_0=args.image_path_0,
@@ -135,5 +135,5 @@ images = pipeline(
     use_lora=not args.no_lora,
     guidance_scale=7.5 # SDXL Change: Set a good default CFG
 )
-images[0].save(f"{args.output_path}/output.gif", save_all=True,
+images 0 .save(f"{args.output_path}/output.gif", save_all=True,
                append_images=images[1:], duration=args.duration, loop=0)
