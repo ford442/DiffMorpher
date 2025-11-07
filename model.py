@@ -376,7 +376,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             
             # --- Handle LoRA for Image 0 ---
             # Create a directory name, not a file name
-            lora_dir_name_0 = f"{os.path.splitext(os.path.basename(img_path_0))[0]}_lora"
+            lora_dir_name_0 = f"{os.path.splitext(os.path.basename(img_path_0))[0]}_lora.safetensors"
             final_lora_path_0 = os.path.join(save_lora_dir, lora_dir_name_0)
 
 
