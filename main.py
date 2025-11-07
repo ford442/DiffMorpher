@@ -89,7 +89,7 @@ dtype = torch.bfloat16 # Using float16 for T4/L4 VRAM
 vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
 text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=dtype)
 text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", torch_dtype=dtype)
-tokenizer = CLIPTokenizer.from_pretraine`d(model_path, subfolder="tokenizer")
+tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
 tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer_2")
 unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=dtype)
 scheduler = KarrasDiffusionSchedulers.from_pretrained(model_path, subfolder="scheduler")
