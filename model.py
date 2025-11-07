@@ -2,7 +2,7 @@ import os
 from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.attention_processor import AttnProcessor
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
-from diffusers.schedulers import KarrasDiffusionSchedulers
+from diffusers.schedulers import KarrasDiffusionSchedulers, DDPMScheduler
 import torch
 import torch.nn.functional as F
 import tqdm
@@ -86,7 +86,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         tokenizer: CLIPTokenizer,
         tokenizer_2: CLIPTokenizer,
         unet: UNet2DConditionModel,
-        scheduler: KarrasDiffusionSchedulers,
+        scheduler: DDPMScheduler,
         feature_extractor: CLIPImageProcessor = None,
         image_encoder=None,
     ):
