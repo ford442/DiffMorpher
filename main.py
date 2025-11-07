@@ -6,7 +6,7 @@ from PIL import Image
 from argparse import ArgumentParser
 from model import DiffMorpherPipelineXL
 import utils.lora_utils
-from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler
+from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler, StableDiffusionXLPipeline
 from diffusers.schedulers import KarrasDiffusionSchedulers
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
@@ -86,23 +86,17 @@ os.makedirs(args.output_path, exist_ok=True)
 model_path = args.model_path
 dtype = torch.bfloat16 # Using float16 for T4/L4 VRAM
 
-vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
-text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=dtype)
-text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", torch_dtype=dtype)
-tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
-tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer_2")
-unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=dtype)
-scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler") # Use DDPMScheduler
+base_pipeline = StableDiffusionXLPipeline.from_pretrained(model_path, torch_dtype=dtype)
 
 # 2. Instantiate your custom pipeline class with the components
 pipeline = DiffMorpherPipelineXL(
-    vae=vae,
-    text_encoder=text_encoder,
-    text_encoder_2=text_encoder_2,
-    tokenizer=tokenizer,
-    tokenizer_2=tokenizer_2,
-    unet=unet,
-    scheduler=scheduler,
+    vae=base_pipeline.vae,
+    text_encoder=base_pipeline.text_encoder,
+    text_encoder_2=base_pipeline.text_encoder_2,
+    tokenizer=base_pipeline.tokenizer,
+    tokenizer_2=base_pipeline.tokenizer_2,
+    unet=base_pipeline.unet,
+    scheduler=DDPMScheduler.from_config(base_pipeline.scheduler.config),
 )
 
 # 3. Apply your VRAM-saving offload
