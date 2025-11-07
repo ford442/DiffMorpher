@@ -129,7 +129,7 @@ def train_lora(
   text_encoder.requires_grad_(False)
   text_encoder_2.requires_grad_(False)
   unet.requires_grad_(False) # Freeze the entire UNet first
-  # 2. Set up LoRA layers manually
+# 2. Set up LoRA layers manually
   unet.train()
   unet_lora_attn_procs = {}
   
@@ -149,14 +149,12 @@ def train_lora(
       # --- THIS IS THE FIX ---
       if cross_attention_dim is None:
           # This is for self-attention (LoRAAttnProcessor)
-          # It only takes 'rank'
+          # Based on the tracebacks, it takes NO arguments
           attn_procs_class = LoRAAttnProcessor
-          unet_lora_attn_procs[name] = attn_procs_class(
-              rank=lora_rank
-          )
+          unet_lora_attn_procs[name] = attn_procs_class()
       else:
           # This is for cross-attention (LoRAAttnAddedKVProcessor)
-          # It takes 'hidden_size', 'cross_attention_dim', and 'rank'
+          # This one (correctly) takes all arguments
           attn_procs_class = LoRAAttnAddedKVProcessor
           unet_lora_attn_procs[name] = attn_procs_class(
               hidden_size=hidden_size, 
