@@ -12,6 +12,8 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed
 from packaging import version
 import tqdm
+from peft import LoraConfig
+import safetensors # <--- ADD THIS LINE
 
 from transformers import AutoTokenizer, PretrainedConfig, CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
