@@ -149,9 +149,7 @@ def train_lora_xl(
         # --- Save the LoRA ---
         unet = accelerator.unwrap_model(unet)
         lora_state_dict = get_peft_model_state_dict(unet, adapter_name="default")
-    
-        save_path = os.path.join(save_lora_dir, weight_name)
-    
+       
         # Use the official diffusers save method
         unet.save_pretrained(save_path)
 
