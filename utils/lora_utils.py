@@ -1,267 +1,153 @@
-from timeit import default_timer as timer
-from datetime import timedelta
-from PIL import Image
 import os
-import numpy as np
-from einops import rearrange
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-import transformers
 from accelerate import Accelerator
 from accelerate.utils import set_seed
-from packaging import version
-import tqdm
+from tqdm.auto import tqdm
 from peft import LoraConfig
-import safetensors # <--- ADD THIS LINE
+from peft.utils import get_peft_model_state_dict
 
-from transformers import AutoTokenizer, PretrainedConfig, CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
-
-import diffusers
-
-from diffusers import (
-    AutoencoderKL,
-    DDPMScheduler,
-    DiffusionPipeline,
-    DPMSolverMultistepScheduler,
-    StableDiffusionPipeline,
-    UNet2DConditionModel,
-)
-
-from diffusers.loaders import AttnProcsLayers, LoraLoaderMixin
-from diffusers.models.attention_processor import (
-    AttnAddedKVProcessor,
-    AttnAddedKVProcessor2_0,
-    LoRAAttnAddedKVProcessor,
-    LoRAAttnProcessor,
-    LoRAAttnProcessor2_0,
-    SlicedAttnAddedKVProcessor,
-)
-
+from diffusers import DDPMScheduler
+from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 from diffusers.optimization import get_scheduler
-from diffusers.utils import check_min_version
-from diffusers.utils.import_utils import is_xformers_available
 
-check_min_version("0.17.0")
-
-def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
-    text_encoder_config = PretrainedConfig.from_pretrained(
-        pretrained_model_name_or_path,
-        subfolder="text_encoder",
-        revision=revision,
-    )
-    model_class = text_encoder_config.architectures[0]
-    if model_class == "CLIPTextModel":
-        from transformers import CLIPTextModel
-        return CLIPTextModel
-    elif model_class == "RobertaSeriesModelWithTransformation":
-        from diffusers.pipelines.alt_diffusion.modeling_roberta_series import RobertaSeriesModelWithTransformation
-        return RobertaSeriesModelWithTransformation
-    elif model_class == "T5EncoderModel":
-        from transformers import T5EncoderModel
-        return T5EncoderModel
-    else:
-        raise ValueError(f"{model_class} is not supported.")
-
+# This is a helper function to encode prompts for SDXL's two text encoders
 def encode_prompt_xl(text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt):
     device = text_encoder.device
-    tokenizers = [tokenizer, tokenizer_2] if tokenizer is not None else [tokenizer_2]
-    text_encoders = [text_encoder, text_encoder_2] if text_encoder is not None else [text_encoder_2]
-    prompt_embeds_list = []
-    for tokenizer, text_encoder in zip(tokenizers, text_encoders):
-        text_inputs = tokenizer(
+    
+    # Tokenize
+    tokenizers = [tokenizer, tokenizer_2]
+    text_input_ids_list = []
+    for t in tokenizers:
+        text_input = t(
             prompt,
             padding="max_length",
-            max_length=tokenizer.model_max_length,
+            max_length=t.model_max_length,
             truncation=True,
             return_tensors="pt",
         )
-        text_input_ids = text_inputs.input_ids.to(device)
-        prompt_embeds = text_encoder(
-            text_input_ids,
-            output_hidden_states=True,
-        )
+        text_input_ids_list.append(text_input.input_ids)
+    
+    text_input_ids = torch.cat(text_input_ids_list, dim=-1)
+
+    # Encode
+    prompt_embeds_list = []
+    text_encoders = [text_encoder, text_encoder_2]
+    for i, text_encoder_model in enumerate(text_encoders):
+        prompt_embeds = text_encoder_model(text_input_ids_list[i].to(device), output_hidden_states=True)
         pooled_prompt_embeds = prompt_embeds[0]
-        prompt_embeds = prompt_embeds.hidden_states[-2] # Use penultimate layer
+        prompt_embeds = prompt_embeds.hidden_states[-2]
         prompt_embeds_list.append(prompt_embeds)
-    prompt_embeds = torch.concat(prompt_embeds_list, dim=-1)
-    pooled_prompt_embeds = pooled_prompt_embeds.to(device)
+
+    prompt_embeds = torch.cat(prompt_embeds_list, dim=-1)
     return prompt_embeds, pooled_prompt_embeds
 
+# This is a helper function for SDXL's conditioning
 def get_add_time_ids(original_size, crops_coords_top_left, target_size, dtype, device):
     add_time_ids = list(original_size + crops_coords_top_left + target_size)
     add_time_ids = torch.tensor([add_time_ids], dtype=dtype, device=device)
     return add_time_ids
 
-def train_lora(
-  image, prompt, save_lora_dir, model_path=None,
-  text_encoder=None, text_encoder_2=None,
-  tokenizer=None, tokenizer_2=None,
-  vae=None, unet=None,
-  lora_steps=200, lora_lr=2e-4, lora_rank=16,
-  weight_name=None, safe_serialization=False, progress=tqdm
+
+def train_lora_xl(
+    image, prompt, save_lora_dir,
+    unet, vae, text_encoder, text_encoder_2, tokenizer, tokenizer_2,
+    lora_steps=200, lora_lr=2e-4, lora_rank=16,
+    weight_name="lora.safetensors",
 ):
-  accelerator = Accelerator(gradient_accumulation_steps=1)
-  set_seed(0)
-  weight_dtype = torch.bfloat16
-  if tokenizer is None:
-      tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer", revision=None)
-  if tokenizer_2 is None:
-      tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer_2", revision=None)
-  if text_encoder is None:
-      text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", revision=None, torch_dtype=weight_dtype)
-  if text_encoder_2 is None:
-      text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", revision=None, torch_dtype=weight_dtype)
-  if vae is None:
-      vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", revision=None, torch_dtype=weight_dtype)
-  #if unet is None:
-  unet = UNet2DConditionModel.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="unet", revision=None, torch_dtype=weight_dtype)
-  #if noise_scheduler is None:
-  noise_scheduler = DDPMScheduler.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="scheduler")
-  device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-  unet_dtype = weight_dtype
-  vae.to(weight_dtype)
-  text_encoder.to(device)
-  text_encoder_2.to(device)
-  unet.to(device, weight_dtype)
-  # 1. Freeze all parameters in the UNet before adding the adapter
-  vae.requires_grad_(False)
-  text_encoder.requires_grad_(False)
-  text_encoder_2.requires_grad_(False)
-  unet.requires_grad_(False) # Freeze the entire UNet first
-  # 2. Set up LoRA layers manually
-  unet.train()
-  unet_lora_attn_procs = {}
-  
-  for name, attn_processor in unet.attn_processors.items():
-      cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+    # --- Basic Setup ---
+    set_seed(42)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=1,
+        mixed_precision="bf16", # Use bfloat16 for speed and memory
+    )
+    device = accelerator.device
+    weight_dtype = torch.bfloat16
 
-      # --- THIS IS THE FIX ---
-      # Based on the cascade of errors, your version of diffusers
-      # expects *both* processor types to only take 'rank'.
-      if cross_attention_dim is None:
-          # This is for self-attention
-          attn_procs_class = LoRAAttnProcessor
-          unet_lora_attn_procs[name] = attn_procs_class(
-              rank=lora_rank
-          )
-      else:
-          # This is for cross-attention
-          attn_procs_class = LoRAAttnAddedKVProcessor
-          unet_lora_attn_procs[name] = attn_procs_class(
-              rank=lora_rank
-          )
-      # --- END FIX ---
-  
-  unet.set_attn_processor(unet_lora_attn_procs)
-  
-  # 3. Gather trainable parameters by name
-  params_to_optimize = [
-      param for name, param in unet.named_parameters() if "lora" in name
-  ]
+    # --- Freeze Models ---
+    vae.requires_grad_(False)
+    text_encoder.requires_grad_(False)
+    text_encoder_2.requires_grad_(False)
+    unet.requires_grad_(False)
     
-  # 4. Optimizer creation (remains the same)
-  optimizer = torch.optim.AdamW(
-      params_to_optimize,
-      lr=lora_lr,
-      betas=(0.9, 0.999),
-      weight_decay=1e-2,
-      eps=1e-08,
-  )
-  # 5. LR scheduler creation (remains the same)
-  lr_scheduler = get_scheduler(
-      "constant",
-      optimizer=optimizer,
-      num_warmup_steps=0,
-      num_training_steps=lora_steps,
-  )
-  # 6. Prepare with accelerate (remains the same)
-  # Note: we are preparing the entire unet, which now contains the LoRA adapter
-  unet, optimizer, lr_scheduler = accelerator.prepare(
-      unet, optimizer, lr_scheduler
-  )
-  # 7. Get embeddings and conditioning (remains the same)
-  with torch.no_grad():
-      prompt_embeds, pooled_prompt_embeds = encode_prompt_xl(
-          text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
-      )
-  add_time_ids = get_add_time_ids(
-      (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, device=device
-  )
-  bsz = 1
-  added_cond_kwargs = {"text_embeds": pooled_prompt_embeds.repeat(bsz, 1), "time_ids": add_time_ids.repeat(bsz, 1)}
-  prompt_embeds = prompt_embeds.repeat(bsz, 1, 1)
-  if type(image) == np.ndarray:
-      image = Image.fromarray(image)
-  image_transforms = transforms.Compose(
-      [
-          transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILINEAR),
-          transforms.CenterCrop(1024),
-          transforms.ToTensor(),
-          transforms.Normalize([0.5], [0.5]),
-      ]
-  )
-  image = image_transforms(image).to(device)
-  image = image.unsqueeze(dim=0)
-  with torch.no_grad():
-      latents_dist = vae.encode(image.to(dtype=weight_dtype)).latent_dist
-  # 8. Set unet to train mode
-  unet.train()
-  # Training loop (remains the same)
-  for _ in progress.tqdm(range(lora_steps), desc="Training LoRA..."):
-      model_input = latents_dist.sample() * vae.config.scaling_factor
-      model_input = model_input.to(dtype=unet.dtype)
-      noise = torch.randn_like(model_input)
-      timesteps = torch.randint(
-          0, noise_scheduler.config.num_train_timesteps, (bsz,), device=model_input.device
-      ).long()
-      noisy_model_input = noise_scheduler.add_noise(model_input, noise, timesteps)
-      model_pred = unet(
-          noisy_model_input,
-          timesteps,
-          prompt_embeds,
-          added_cond_kwargs=added_cond_kwargs
-      ).sample
-      if noise_scheduler.config.prediction_type == "epsilon":
-          target = noise
-      elif noise_scheduler.config.prediction_type == "v_prediction":
-          target = noise_scheduler.get_velocity(model_input, noise, timesteps)
-      else:
-          raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
-      loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-      accelerator.backward(loss)
-      optimizer.step()
-      lr_scheduler.step()
-      optimizer.zero_grad()
-
-# 9. Save weights using the old (manual) method
-  unet = accelerator.unwrap_model(unet)
-  
-  # Get the state dictionary for the manual attention processors
-  lora_state_dict = AttnProcsLayers(unet.attn_processors).state_dict()
-  
-  save_path = os.path.join(save_lora_dir, weight_name)
-
-  # Manually save the state dict
-  if safe_serialization:
-      import safetensors
-      safetensors.torch.save_file(lora_state_dict, save_path)
-  else:
-      torch.save(lora_state_dict, save_path)
-      
-def load_lora(unet, lora_0, lora_1, alpha):
-    """
-    Manually interpolates and loads LoRA weights.
-    """
-    lora = {}
+    # --- Add PEFT LoRA Adapters to the UNet ---
+    unet.train()
+    lora_config = LoraConfig(
+        r=lora_rank,
+        lora_alpha=lora_rank,
+        init_lora_weights="gaussian",
+        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+    )
+    unet.add_adapter(lora_config)
     
-    # Interpolate between the two LoRA state dictionaries
-    for key in lora_0:
-        if key in lora_1:
-            lora[key] = (1 - alpha) * lora_0[key] + alpha * lora_1[key]
-        else:
-            lora[key] = lora_0[key] # Fallback if keys don't match
+    # --- Prepare Models for Training ---
+    unet.to(device, dtype=weight_dtype)
+    vae.to(device, dtype=weight_dtype)
+    text_encoder.to(device, dtype=weight_dtype)
+    text_encoder_2.to(device, dtype=weight_dtype)
+
+    # --- Optimizer ---
+    lora_layers = filter(lambda p: p.requires_grad, unet.parameters())
+    optimizer = torch.optim.AdamW(lora_layers, lr=lora_lr)
+    
+    # --- Prepare with Accelerator ---
+    unet, optimizer = accelerator.prepare(unet, optimizer)
+
+    # --- Prepare Data ---
+    with torch.no_grad():
+        prompt_embeds, pooled_embeds = encode_prompt_xl(
+            text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
+        )
+        add_time_ids = get_add_time_ids((1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, device=device)
+    
+    added_cond_kwargs = {"text_embeds": pooled_embeds, "time_ids": add_time_ids}
+    
+    image_transforms = transforms.Compose([
+        transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.CenterCrop(1024),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5], [0.5]),
+    ])
+    train_image = image_transforms(image).unsqueeze(0).to(device, dtype=weight_dtype)
+
+    with torch.no_grad():
+        latents = vae.encode(train_image).latent_dist.sample()
+        latents = latents * vae.config.scaling_factor
+
+    noise_scheduler = DDPMScheduler.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="scheduler")
+
+    # --- Training Loop ---
+    progress_bar = tqdm(range(lora_steps), desc=f"Training {weight_name}")
+    for step in range(lora_steps):
+        with accelerator.accumulate(unet):
+            noise = torch.randn_like(latents)
+            timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (1,), device=device).long()
+            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+            model_pred = unet(
+                noisy_latents,
+                timesteps,
+                encoder_hidden_states=prompt_embeds,
+                added_cond_kwargs=added_cond_kwargs
+            ).sample
             
-    # Load the interpolated weights using the "old" method
-    unet.load_attn_procs(lora)
-    return unet
+            loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+            
+            accelerator.backward(loss)
+            optimizer.step()
+            optimizer.zero_grad()
+        
+        progress_bar.update(1)
+        progress_bar.set_postfix(loss=loss.detach().item())
+
+    # --- Save the LoRA ---
+    unet = accelerator.unwrap_model(unet)
+    lora_state_dict = get_peft_model_state_dict(unet)
+    
+    save_path = os.path.join(save_lora_dir, weight_name)
+    
+    # Use the official diffusers save method
+    unet.save_attn_procs(save_lora_dir, safe_serialization=True, state_dict=lora_state_dict)
+
+    print(f"LoRA saved to {save_path}")
