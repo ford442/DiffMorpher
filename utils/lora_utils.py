@@ -79,11 +79,6 @@ def train_lora_xl(
             target_modules=["to_k", "to_q", "to_v", "to_out.0"],
         )
         unet.add_adapter(lora_config)
-    
-    # We use a try...finally block to ensure the adapter is removed after training
-    try:
-        # Add the temporary adapter for training. It will be named "default".
-        #unet.add_adapter(lora_config)
         
         # --- Prepare Models for Training ---
         unet.to(device, dtype=weight_dtype)
