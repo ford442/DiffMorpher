@@ -223,8 +223,8 @@ def train_lora(
   unet = accelerator.unwrap_model(unet)
   # This is the new, correct way to save LoRA weights from a model
   # that has an adapter attached.
-  unet.save_lora_weights(
+  unet.save_adapter(
       save_directory=save_lora_dir,
-      weight_name=weight_name,
+      adapter_name=weight_name, # Use weight_name as the adapter name
       safe_serialization=safe_serialization
   )
