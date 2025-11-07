@@ -6,6 +6,9 @@ from PIL import Image
 from argparse import ArgumentParser
 from model import DiffMorpherPipelineXL 
 import utils.lora_utils
+from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers.schedulers import KarrasDiffusionSchedulers
+from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
 parser = ArgumentParser()
 parser.add_argument(
@@ -79,11 +82,30 @@ args = parser.parse_args()
 
 os.makedirs(args.output_path, exist_ok=True)
 
-# SDXL Change: Use fp16 for faster inference
-pipeline = DiffMorpherPipelineXL.from_pretrained(
-    args.model_path, dtype=torch.bfloat16
+# 1. Load all components
+model_path = args.model_path
+dtype = torch.bfloat16 # Using float16 for T4/L4 VRAM
+
+vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
+text_encoder = CLIPTextModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=dtype)
+text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfolder="text_encoder_2", torch_dtype=dtype)
+tokenizer = CLIPTokenizer.from_pretraine`d(model_path, subfolder="tokenizer")
+tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer_2")
+unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=dtype)
+scheduler = KarrasDiffusionSchedulers.from_pretrained(model_path, subfolder="scheduler")
+
+# 2. Instantiate your custom pipeline class with the components
+pipeline = DiffMorpherPipelineXL(
+    vae=vae,
+    text_encoder=text_encoder,
+    text_encoder_2=text_encoder_2,
+    tokenizer=tokenizer,
+    tokenizer_2=tokenizer_2,
+    unet=unet,
+    scheduler=scheduler,
 )
-pipeline.to(torch.bfloat16)
+
+# 3. Apply your VRAM-saving offload
 pipeline.enable_model_cpu_offload()
 
 # We need to explicitly point model_xl.py to the new lora_utils_xl
