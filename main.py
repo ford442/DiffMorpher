@@ -83,7 +83,7 @@ os.makedirs(args.output_path, exist_ok=True)
 pipeline = DiffMorpherPipelineXL.from_pretrained(
     args.model_path, dtype=torch.bfloat16
 )
-pipeline.to("cuda",torch.bfloat16)
+pipeline.to(torch.bfloat16)
 pipeline.enable_model_cpu_offload()
 
 # We need to explicitly point model_xl.py to the new lora_utils_xl
