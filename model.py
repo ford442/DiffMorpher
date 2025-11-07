@@ -382,19 +382,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
             if not os.path.exists(final_lora_path_0):
                 print(f"Training LoRA for image 0...")
-                # 1. Train and get the raw state dict
-                lora_state_dict = train_lora_xl(
-                    image=img_0, prompt=prompt_0, save_path=final_lora_path_0, # Pass the directory path
+                train_lora_xl(
+                    image=img_0, prompt=prompt_0, save_path=final_lora_path_0,
                     unet=self.unet, vae=self.vae,
                     text_encoder=self.text_encoder, text_encoder_2=self.text_encoder_2,
                     tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2,
                     lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank
-                )
-                prefixed_lora_state_dict = {f"unet.{k}": v for k, v in lora_state_dict.items()}
-                # 3. Use the pipeline's save method with the CORRECTLY PREFIXED dictionary.
-                self.save_lora_weights(
-                    save_directory=final_lora_path_0,
-                    unet_lora_layers=prefixed_lora_state_dict  # Pass the prefixed one
                 )
                 print(f"LoRA for image 0 saved to {final_lora_path_0}")
 
@@ -404,17 +397,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
             if not os.path.exists(final_lora_path_1):
                 print(f"Training LoRA for image 1...")
-                lora_state_dict = train_lora_xl(
-                    image=img_1, prompt=prompt_1, save_path=final_lora_path_1, # Pass the directory path
+                train_lora_xl(
+                    image=img_1, prompt=prompt_1, save_path=final_lora_path_1,
                     unet=self.unet, vae=self.vae,
                     text_encoder=self.text_encoder, text_encoder_2=self.text_encoder_2,
                     tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2,
                     lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank
-                )
-                prefixed_lora_state_dict = {f"unet.{k}": v for k, v in lora_state_dict.items()}
-                self.save_lora_weights(
-                    save_directory=final_lora_path_1,
-                    unet_lora_layers=prefixed_lora_state_dict
                 )
                 print(f"LoRA for image 1 saved to {final_lora_path_1}")
 
