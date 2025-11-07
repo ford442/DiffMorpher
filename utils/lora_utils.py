@@ -129,36 +129,26 @@ def train_lora(
   text_encoder.requires_grad_(False)
   text_encoder_2.requires_grad_(False)
   unet.requires_grad_(False) # Freeze the entire UNet first
-# 2. Set up LoRA layers manually
+  # 2. Set up LoRA layers manually
   unet.train()
   unet_lora_attn_procs = {}
   
   for name, attn_processor in unet.attn_processors.items():
       cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
-      if name.startswith("mid_block"):
-          hidden_size = unet.config.block_out_channels[-1]
-      elif name.startswith("up_blocks"):
-          block_id = int(name[len("up_blocks.")])
-          hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
-      elif name.startswith("down_blocks"):
-          block_id = int(name[len("down_blocks.")])
-          hidden_size = unet.config.block_out_channels[block_id]
-      else:
-          hidden_size = unet.config.block_out_channels[0] # Fallback
 
       # --- THIS IS THE FIX ---
+      # Based on the cascade of errors, your version of diffusers
+      # expects *both* processor types to only take 'rank'.
       if cross_attention_dim is None:
-          # This is for self-attention (LoRAAttnProcessor)
-          # Based on the tracebacks, it takes NO arguments
+          # This is for self-attention
           attn_procs_class = LoRAAttnProcessor
-          unet_lora_attn_procs[name] = attn_procs_class()
+          unet_lora_attn_procs[name] = attn_procs_class(
+              rank=lora_rank
+          )
       else:
-          # This is for cross-attention (LoRAAttnAddedKVProcessor)
-          # This one (correctly) takes all arguments
+          # This is for cross-attention
           attn_procs_class = LoRAAttnAddedKVProcessor
           unet_lora_attn_procs[name] = attn_procs_class(
-              hidden_size=hidden_size, 
-              cross_attention_dim=cross_attention_dim, 
               rank=lora_rank
           )
       # --- END FIX ---
