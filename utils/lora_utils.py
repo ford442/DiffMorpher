@@ -228,10 +228,3 @@ def train_lora(
       weight_name=weight_name,
       safe_serialization=safe_serialization
   )
-
-def load_lora(unet, lora_0, lora_1, alpha):
-    lora = {}
-    for key in lora_0:
-        lora[key] = (1 - alpha) * lora_0[key] + alpha * lora_1[key]
-    unet.load_attn_procs(lora)
-    return unet
