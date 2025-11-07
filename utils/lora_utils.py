@@ -71,12 +71,11 @@ def train_lora_xl(
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
     
-    lora_state_dict = None
     try:
         unet.train()
         lora_config = LoraConfig(
             r=lora_rank, lora_alpha=lora_rank, init_lora_weights="gaussian",
-            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+            target_modules=["to_q", "to_k", "to_v", "to_out.0", "add_k_proj", "add_v_proj"],
         )
         unet.add_adapter(lora_config)
         
@@ -143,8 +142,6 @@ def train_lora_xl(
 
         # --- Save the LoRA ---
         unet = accelerator.unwrap_model(unet)
-        lora_state_dict = get_peft_model_state_dict(unet)
-       
         # Use the official diffusers save method
         unet.save_pretrained(save_path)
 
@@ -154,5 +151,3 @@ def train_lora_xl(
         if "default" in unet.peft_config:
             unet.delete_adapters(["default"])
             print("Cleaned up temporary training adapter.")
-            
-    return lora_state_dict
