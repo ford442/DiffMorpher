@@ -16,7 +16,7 @@ from argparse import ArgumentParser
 import inspect
 
 from utils.model_utils import get_img, slerp, do_replace_attn 
-from utils.lora_utils import train_lora, load_lora
+from utils.lora_utils import train_lora
 from utils.alpha_scheduler import AlphaScheduler
 
 class StoreProcessor():
