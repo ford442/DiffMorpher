@@ -16,7 +16,7 @@ from argparse import ArgumentParser
 import inspect
 
 from utils.model_utils import get_img, slerp, do_replace_attn 
-from utils.lora_utils import train_lora
+from utils.lora_utils import train_lora_xl
 from utils.alpha_scheduler import AlphaScheduler
 
 class StoreProcessor():
@@ -365,19 +365,53 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         self.use_reschedule = use_reschedule
         self.output_path = output_path
         
-        if img_0 is None:
-            img_0 = Image.open(img_path_0).convert("RGB")
-        if img_1 is None:
-            img_1 = Image.open(img_path_1).convert("RGB")
+        if img_0 is None: img_0 = Image.open(img_path_0).convert("RGB")
+        if img_1 is None: img_1 = Image.open(img_path_1).convert("RGB")
             
-        if self.use_lora:
-            print("Loading and fusing LoRA adapters...")
-            # Load the first LoRA with a specific adapter name
-            self.load_lora_weights(load_lora_path_0, adapter_name="lora_0")
-            # Load the second LoRA with another adapter name
-            self.load_lora_weights(load_lora_path_1, adapter_name="lora_1")
+        final_lora_path_0 = load_lora_path_0
+        final_lora_path_1 = load_lora_path_1
 
-            # The key change: Combine adapters. This prepares the UNet to accept weights for both.
+        if self.use_lora:
+            os.makedirs(save_lora_dir, exist_ok=True)
+            
+            # --- Handle LoRA for Image 0 ---
+            if not final_lora_path_0:
+                # If no path is given, create a default name
+                lora_name_0 = f"{os.path.splitext(os.path.basename(img_path_0))[0]}_lora.safetensors"
+                final_lora_path_0 = os.path.join(save_lora_dir, lora_name_0)
+
+            if not os.path.exists(final_lora_path_0):
+                print(f"LoRA for image 0 not found. Training and saving to {final_lora_path_0}")
+                train_lora_xl(
+                    image=img_0, prompt=prompt_0, save_lora_dir=save_lora_dir,
+                    unet=self.unet, vae=self.vae,
+                    text_encoder=self.text_encoder, text_encoder_2=self.text_encoder_2,
+                    tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2,
+                    lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank,
+                    weight_name=os.path.basename(final_lora_path_0)
+                )
+
+            # --- Handle LoRA for Image 1 ---
+            if not final_lora_path_1:
+                # If no path is given, create a default name
+                lora_name_1 = f"{os.path.splitext(os.path.basename(img_path_1))[0]}_lora.safetensors"
+                final_lora_path_1 = os.path.join(save_lora_dir, lora_name_1)
+
+            if not os.path.exists(final_lora_path_1):
+                print(f"LoRA for image 1 not found. Training and saving to {final_lora_path_1}")
+                train_lora_xl(
+                    image=img_1, prompt=prompt_1, save_lora_dir=save_lora_dir,
+                    unet=self.unet, vae=self.vae,
+                    text_encoder=self.text_encoder, text_encoder_2=self.text_encoder_2,
+                    tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2,
+                    lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank,
+                    weight_name=os.path.basename(final_lora_path_1)
+                )
+
+            # --- Load the LoRAs ---
+            print("Loading and fusing LoRA adapters...")
+            self.load_lora_weights(save_lora_dir, weight_name=os.path.basename(final_lora_path_0), adapter_name="lora_0")
+            self.load_lora_weights(save_lora_dir, weight_name=os.path.basename(final_lora_path_1), adapter_name="lora_1")
             self.set_adapters(["lora_0", "lora_1"])
             
         # SDXL Change: Get both sets of embeddings
