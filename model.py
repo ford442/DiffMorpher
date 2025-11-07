@@ -375,9 +375,10 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             os.makedirs(save_lora_dir, exist_ok=True)
             
             # --- Handle LoRA for Image 0 ---
-                # Create a directory name, not a file name
+            # Create a directory name, not a file name
             lora_dir_name_0 = f"{os.path.splitext(os.path.basename(img_path_0))[0]}_lora"
             final_lora_path_0 = os.path.join(save_lora_dir, lora_dir_name_0)
+
 
             if not os.path.exists(final_lora_path_0):
                 print(f"Training LoRA for image 0...")
