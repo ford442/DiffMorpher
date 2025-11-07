@@ -114,8 +114,8 @@ pipeline.enable_model_cpu_offload()
 import model
 # (This line was likely deleted by mistake, make sure it's present)
 model.train_lora = utils.lora_utils.train_lora
-# (This line should be deleted, as it's part of the old way)
-# model.load_lora = utils.lora_utils.load_lora 
+# (This line should be deleted, as it's part of the old way
+model.load_lora = utils.lora_utils.load_lora 
 
 images = pipeline(
     img_path_0=args.image_path_0,
