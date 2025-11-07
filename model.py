@@ -249,56 +249,41 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
     # SDXL Change: cal_latent needs to interpolate both sets of embeddings
     @torch.no_grad()
-    def cal_latent(self, num_inference_steps, guidance_scale, unconditioning, 
-                   img_noise_0, img_noise_1, 
-                   prompt_embeds_0, pooled_embeds_0,  # SDXL Change
-                   prompt_embeds_1, pooled_embeds_1,  # SDXL Change
-                   lora_0, lora_1, alpha, use_lora, fix_lora=None):
+    def cal_latent(self, num_inference_steps, guidance_scale, unconditioning,
+                   img_noise_0, img_noise_1,
+                   prompt_embeds_0, pooled_embeds_0,
+                   prompt_embeds_1, pooled_embeds_1,
+                   alpha, use_lora): # No more lora_0, lora_1, fix_lora
         
         latents = slerp(img_noise_0, img_noise_1, alpha, self.use_adain)
         
-        # SDXL Change: Interpolate both prompt and pooled embeddings
         prompt_embeds = (1 - alpha) * prompt_embeds_0 + alpha * prompt_embeds_1
         pooled_embeds = (1 - alpha) * pooled_embeds_0 + alpha * pooled_embeds_1
 
-        # SDXL Change: Prepare added_cond_kwargs
         add_time_ids = self._get_add_time_ids(
             (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype
         ).to(self.device)
-        added_cond_kwargs = {"text_embeds": pooled_embeds, "time_ids": add_time_ids}
-
-        # Handle CFG for pooled embeds
+        
+        # Correct handling of CFG for pooled embeddings
         if guidance_scale > 1.:
-            # Unconditional embeds are the first half
-            neg_pooled_embeds = pooled_embeds[:pooled_embeds.shape[0]//2]
-            pooled_embeds = pooled_embeds[pooled_embeds.shape[0]//2:]
-            # Duplicate pooled embeds for CFG
-            cfg_pooled_embeds = torch.cat([neg_pooled_embeds, pooled_embeds], dim=0)
-            added_cond_kwargs["text_embeds"] = cfg_pooled_embeds
+            # The incoming prompt_embeds and pooled_embeds are already concatenated for CFG
+            uncond_pooled, cond_pooled = pooled_embeds.chunk(2)
+            # Interpolate for the final conditional and unconditional pooled embeddings
+            pooled_embeds = torch.cat([uncond_pooled, cond_pooled])
 
-
+        added_cond_kwargs = {"text_embeds": pooled_embeds, "time_ids": add_time_ids}
+        
         self.scheduler.set_timesteps(num_inference_steps)
         
-        if use_lora:
-            if fix_lora is not None:
-                self.unet = load_lora(self.unet, lora_0, lora_1, fix_lora)
-            else:
-                self.unet = load_lora(self.unet, lora_0, lora_1, alpha)
-                
-        for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha}")):
-            if guidance_scale > 1.:
-                model_inputs = torch.cat([latents] * 2)
-            else:
-                model_inputs = latents
+        # LoRA is now handled outside this function using set_adapters
+        
+        for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha:.2f}")):
+            model_inputs = torch.cat([latents] * 2) if guidance_scale > 1. else latents
             
-            # Note: unconditioning logic from original model.py is omitted for simplicity
-            # It would need to be adapted for dual embeds if required
-
-            # SDXL Change: U-Net call with new kwargs
             noise_pred = self.unet(
-                model_inputs, 
-                t, 
-                encoder_hidden_states=prompt_embeds, 
+                model_inputs,
+                t,
+                encoder_hidden_states=prompt_embeds,
                 added_cond_kwargs=added_cond_kwargs
             ).sample
             
@@ -306,7 +291,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 noise_pred_uncon, noise_pred_con = noise_pred.chunk(2, dim=0)
                 noise_pred = noise_pred_uncon + guidance_scale * (noise_pred_con - noise_pred_uncon)
             
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False) 0 
         return latents
 
     # SDXL Change: New function to get dual embeddings
@@ -386,29 +371,14 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             img_1 = Image.open(img_path_1).convert("RGB")
             
         if self.use_lora:
-            print("Loading lora...")
-            
-            if not load_lora_path_0:
-                weight_name = f"{output_path.split('/')[-1]}_lora_0_xl.ckpt" # SDXL Change
-                load_lora_path_0 = save_lora_dir + "/" + weight_name
-                if not os.path.exists(load_lora_path_0):
-                    train_lora( image=img_0, prompt=prompt_0, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
-                        text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, 
-                        unet=self.unet, lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=weight_name)
-            
-            # This is the "old way" of loading
-            lora_0 = torch.load(load_lora_path_0, map_location="cpu")
+            print("Loading and fusing LoRA adapters...")
+            # Load the first LoRA with a specific adapter name
+            self.load_lora_weights(load_lora_path_0, adapter_name="lora_0")  2 
+            # Load the second LoRA with another adapter name
+            self.load_lora_weights(load_lora_path_1, adapter_name="lora_1")  2 
 
-            if not load_lora_path_1:
-                weight_name = f"{output_path.split('/')[-1]}_lora_1_xl.ckpt" # SDXL Change
-                load_lora_path_1 = save_lora_dir + "/" + weight_name
-                if not os.path.exists(load_lora_path_1):
-                    train_lora(image=img_1, prompt=prompt_1, save_lora_dir=save_lora_dir, text_encoder=self.text_encoder, 
-                        text_encoder_2=self.text_encoder_2, tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2, vae=self.vae, unet=self.unet, 
-                        lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank, weight_name=weight_name)
-
-            # This is the "old way" of loading
-            lora_1 = torch.load(load_lora_path_1, map_location="cpu")
+            # The key change: Combine adapters. This prepares the UNet to accept weights for both.
+            self.set_adapters(["lora_0", "lora_1"])
             
         # SDXL Change: Get both sets of embeddings
         prompt_embeds_0, pooled_embeds_0 = self.get_text_embeddings(
@@ -420,144 +390,151 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         img_1 = get_img(img_1) # Uses get_img from model_utils_xl (1024)
         
         if self.use_lora:
-            self.unet = load_lora(self.unet, lora_0, lora_1, 0 if fix_lora is None else fix_lora)
-        img_noise_0 = self.ddim_inversion(
-            self.image2latent(img_0), prompt_embeds_0, pooled_embeds_0) # SDXL Change
-        
-        if self.use_lora:
-            self.unet = load_lora(self.unet, lora_0, lora_1, 1 if fix_lora is None else fix_lora)
+            # Set adapter to fully use lora_1 for the second image inversion
+            self.set_adapters(["lora_1"], adapter_weights=[1.0])  10 
         img_noise_1 = self.ddim_inversion(
-            self.image2latent(img_1), prompt_embeds_1, pooled_embeds_1) # SDXL Change
+            self.image2latent(img_1), prompt_embeds_1, pooled_embeds_1)
 
         print("latents shape: ", img_noise_0.shape)
         
         original_processor = list(self.unet.attn_processors.values())[0]
         
         # This morph function is adapted from the original model.py
-        def morph(alpha_list, progress, desc):
-            images = []
-            if attn_beta is not None:
-                if self.use_lora:
-                    if fix_lora is not None:
-                        adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
-                        self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
-                    else:
-                        self.unet.set_adapters(["lora_0"], adapter_weights=[1.0]) # Set to alpha=0
+    def morph(alpha_list, progress, desc):
+        """
+        Generates the morphing sequence.
+        This function now uses the modern `set_adapters` API for LoRA interpolation
+        while retaining the optional attention-sharing mechanism.
+        """
+        images = []
+    
+        # This branch enables the attention-sharing mechanism for smoother transitions.
+        if attn_beta is not None and attn_beta > 0:
+        
+            # --- 1. Generate the first frame (alpha=0) and store its attention maps ---
+            if self.use_lora:
+                # Set LoRA to be 100% the first image's adapter
+                self.set_adapters(["lora_0"], adapter_weights=[1.0])
 
-                # (Rest of the StoreProcessor setup is correct)
-                attn_processor_dict = {}
-                for k in self.unet.attn_processors.keys():
-                    if do_replace_attn(k):
-                        if self.use_lora:
-                            attn_processor_dict[k] = StoreProcessor(self.unet.attn_processors[k],
-                                                                    self.img0_dict, k)
-                        else:
-                            attn_processor_dict[k] = StoreProcessor(original_processor,
-                                                                    self.img0_dict, k)
-                    else:
-                        attn_processor_dict[k] = self.unet.attn_processors[k]
-                self.unet.set_attn_processor(attn_processor_dict)
+            # Prepare the UNet to store attention maps from the first image
+            attn_processor_dict = {}
+            for k in self.unet.attn_processors.keys():
+                if do_replace_attn(k):
+                    attn_processor_dict[k] = StoreProcessor(self.unet.attn_processors[k], self.img0_dict, k)
+                else:
+                    attn_processor_dict[k] = self.unet.attn_processors[k]
+            self.unet.set_attn_processor(attn_processor_dict)
 
-                # SDXL Change: Pass dual embeds to cal_latent
-                latents = self.cal_latent(
-                    num_inference_steps, guidance_scale, unconditioning,
-                    img_noise_0, img_noise_1,
-                    prompt_embeds_0, pooled_embeds_0,
-                    prompt_embeds_1, pooled_embeds_1,
-                    lora_0, lora_1, alpha_list[0], False, fix_lora
-                )
-                first_image = self.latent2image(latents)
-                first_image = Image.fromarray(first_image)
-                if save_intermediates:
-                    first_image.save(f"{self.output_path}/{0:02d}.png")
+            # Calculate the latent for the first image
+            latents_0 = self.cal_latent(
+                num_inference_steps, guidance_scale, unconditioning,
+                img_noise_0, img_noise_1,
+                prompt_embeds_0, pooled_embeds_0,
+                prompt_embeds_1, pooled_embeds_1,
+                alpha_list[0], self.use_lora # alpha = 0
+            )
+            first_image = self.latent2image(latents_0)
+            first_image = Image.fromarray(first_image)
+            if save_intermediates:
+                first_image.save(f"{self.output_path}/{0:02d}.png")
 
-                # (This block is also correct)
-                if self.use_lora:
-                    self.unet = load_lora(self.unet, lora_0, lora_1, alpha if fix_lora is None else fix_lora)
-                
-                # (Rest of the StoreProcessor setup is correct)
-                attn_processor_dict = {}
-                for k in self.unet.attn_processors.keys():
-                    if do_replace_attn(k):
-                        if self.use_lora:
-                            attn_processor_dict[k] = StoreProcessor(self.unet.attn_processors[k],
-                                                                    self.img1_dict, k)
-                        else:
-                            attn_processor_dict[k] = StoreProcessor(original_processor,
-                                                                    self.img1_dict, k)
-                    else:
-                        attn_processor_dict[k] = self.unet.attn_processors[k]
-                self.unet.set_attn_processor(attn_processor_dict)
+            # --- 2. Generate the last frame (alpha=1) and store its attention maps ---
+            if self.use_lora:
+                # Set LoRA to be 100% the second image's adapter
+                self.set_adapters(["lora_1"], adapter_weights=[1.0])
 
-                # SDXL Change: Pass dual embeds to cal_latent
-                latents = self.cal_latent(
-                    num_inference_steps, guidance_scale, unconditioning,
-                    img_noise_0, img_noise_1,
-                    prompt_embeds_0, pooled_embeds_0,
-                    prompt_embeds_1, pooled_embeds_1,
-                    lora_0, lora_1, alpha_list[-1], False, fix_lora
-                )
-                last_image = self.latent2image(latents)
-                last_image = Image.fromarray(last_image)
-                if save_intermediates:
-                    last_image.save(f"{self.output_path}/{num_frames - 1:02d}.png")
+            # Prepare the UNet to store attention maps from the second image
+            attn_processor_dict = {}
+            for k in self.unet.attn_processors.keys():
+                if do_replace_attn(k):
+                    attn_processor_dict[k] = StoreProcessor(self.unet.attn_processors[k], self.img1_dict, k)
+                else:
+                    attn_processor_dict[k] = self.unet.attn_processors[k]
+            self.unet.set_attn_processor(attn_processor_dict)
+        
+            # Calculate the latent for the last image
+            latents_1 = self.cal_latent(
+                num_inference_steps, guidance_scale, unconditioning,
+                img_noise_0, img_noise_1,
+                prompt_embeds_0, pooled_embeds_0,
+                prompt_embeds_1, pooled_embeds_1,
+                alpha_list[-1], self.use_lora # alpha = 1
+            )
+            last_image = self.latent2image(latents_1)
+            last_image = Image.fromarray(last_image)
+            if save_intermediates:
+                last_image.save(f"{self.output_path}/{num_frames - 1:02d}.png")
 
-                # Main loop (This block is also correct)
-                for i in progress.tqdm(range(1, num_frames - 1), desc=desc):
-                    alpha = alpha_list[i]
-                    if self.use_lora:
-                        if fix_lora is not None:
-                            adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
-                            self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
-                        else:
-                            self.unet.set_adapters(["lora_0", "lora_1"], adapter_weights=[1-alpha, alpha])
-                    
-                    # (LoadProcessor setup is correct)
-                    attn_processor_dict = {}
-                    for k in self.unet.attn_processors.keys():
-                        if do_replace_attn(k):
-                            if self.use_lora:
-                                attn_processor_dict[k] = LoadProcessor(
-                                    self.unet.attn_processors[k], k, self.img0_dict, self.img1_dict, alpha, attn_beta, lamd)
-                            else:
-                                attn_processor_dict[k] = LoadProcessor(
-                                    original_processor, k, self.img0_dict, self.img1_dict, alpha, attn_beta, lamd)
-                        else:
-                            attn_processor_dict[k] = self.unet.attn_processors[k]
-                    self.unet.set_attn_processor(attn_processor_dict)
-
-                    # SDXL Change: Pass dual embeds to cal_latent
-                    latents = self.cal_latent(
-                        num_inference_steps, guidance_scale, unconditioning,
-                        img_noise_0, img_noise_1,
-                        prompt_embeds_0, pooled_embeds_0,
-                        prompt_embeds_1, pooled_embeds_1,
-                        lora_0, lora_1, alpha_list[i], False, fix_lora
-                    )
-                    image = self.latent2image(latents)
-                    image = Image.fromarray(image)
-                    if save_intermediates:
-                        image.save(f"{self.output_path}/{i:02d}.png")
-                    images.append(image)
-                images = [first_image] + images + [last_image]
+            # --- 3. Generate intermediate frames using LoRA interpolation and attention sharing ---
+            intermediate_images = []
+            for i in progress.tqdm(range(1, num_frames - 1), desc=desc):
+                alpha = alpha_list[i]
             
-            # (This 'else' block is also correct, as it calls the updated cal_latent)
-            else:
-                for k, alpha in enumerate(alpha_list):
-                    latents = self.cal_latent(
-                        num_inference_steps, guidance_scale, unconditioning,
-                        img_noise_0, img_noise_1,
-                        prompt_embeds_0, pooled_embeds_0,
-                        prompt_embeds_1, pooled_embeds_1,
-                        lora_0, lora_1, alpha_list[k], self.use_lora, fix_lora
-                    )
-                    image = self.latent2image(latents)
-                    image = Image.fromarray(image)
-                    if save_intermediates:
-                        image.save(f"{self.output_path}/{k:02d}.png")
-                    images.append(image)
+                if self.use_lora:
+                    # The modern way to interpolate: set weights on the two named adapters
+                    self.set_adapters(["lora_0", "lora_1"], adapter_weights=[1-alpha, alpha])
+            
+                # Prepare the UNet to load and blend the stored attention maps
+                attn_processor_dict = {}
+                for k in self.unet.attn_processors.keys():
+                    if do_replace_attn(k):
+                        attn_processor_dict[k] = LoadProcessor(
+                            self.unet.attn_processors[k], k, self.img0_dict, self.img1_dict, 
+                            alpha, attn_beta, lamd
+                        )
+                    else:
+                        attn_processor_dict[k] = self.unet.attn_processors[k]
+                self.unet.set_attn_processor(attn_processor_dict)
 
-            return images
+                # Calculate the latent for the intermediate image
+                latents = self.cal_latent(
+                    num_inference_steps, guidance_scale, unconditioning,
+                    img_noise_0, img_noise_1,
+                    prompt_embeds_0, pooled_embeds_0,
+                    prompt_embeds_1, pooled_embeds_1,
+                    alpha, self.use_lora
+                )
+                image = self.latent2image(latents)
+                image = Image.fromarray(image)
+                if save_intermediates:
+                    image.save(f"{self.output_path}/{i:02d}.png")
+                intermediate_images.append(image)
+            
+            images = [first_image] + intermediate_images + [last_image]
+    
+        else:
+            # This is the simpler path: generate all frames without attention sharing.
+            # Morphing comes from noise, prompt, and LoRA interpolation only.
+            for i in progress.tqdm(range(num_frames), desc=desc):
+                alpha = alpha_list[i]
+            
+                if self.use_lora:
+                    # Interpolate the LoRAs for the current frame
+                    if fix_lora is not None:
+                        # If fixing LoRA, only use one adapter at full strength
+                        adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
+                        self.set_adapters([adapter_name], adapter_weights=[1.0])
+                    else:
+                        # Otherwise, blend the two adapters based on alpha
+                        self.set_adapters(["lora_0", "lora_1"], adapter_weights=[1 - alpha, alpha])
+            
+                # Ensure the original attention processors are active
+                self.unet.set_default_attn_processor()
+
+                latents = self.cal_latent(
+                    num_inference_steps, guidance_scale, unconditioning,
+                    img_noise_0, img_noise_1,
+                    prompt_embeds_0, pooled_embeds_0,
+                    prompt_embeds_1, pooled_embeds_1,
+                    alpha, self.use_lora
+                )
+                image = self.latent2image(latents)
+                image = Image.fromarray(image)
+                if save_intermediates:
+                    image.save(f"{self.output_path}/{i:02d}.png")
+                images.append(image)
+
+        return images
         
         # (Reschedule logic is identical and correct)
         with torch.no_grad():
