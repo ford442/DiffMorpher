@@ -71,19 +71,19 @@ def train_lora_xl(
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
     
-    # --- Add PEFT LoRA Adapters to the UNet ---
-    unet.train()
-    lora_config = LoraConfig(
-        r=lora_rank,
-        lora_alpha=lora_rank,
-        init_lora_weights="gaussian",
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
-    )
+    lora_state_dict = None
+    try:
+        unet.train()
+        lora_config = LoraConfig(
+            r=lora_rank, lora_alpha=lora_rank, init_lora_weights="gaussian",
+            target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        )
+        unet.add_adapter(lora_config)
     
     # We use a try...finally block to ensure the adapter is removed after training
     try:
         # Add the temporary adapter for training. It will be named "default".
-        unet.add_adapter(lora_config)
+        #unet.add_adapter(lora_config)
         
         # --- Prepare Models for Training ---
         unet.to(device, dtype=weight_dtype)
@@ -148,13 +148,16 @@ def train_lora_xl(
 
         # --- Save the LoRA ---
         unet = accelerator.unwrap_model(unet)
-        lora_state_dict = get_peft_model_state_dict(unet, adapter_name="default")
+        lora_state_dict = get_peft_model_state_dict(unet)
        
         # Use the official diffusers save method
         unet.save_lora_adapter(save_path, adapter_name="default")
 
         print(f"LoRA saved to {save_path}")
     finally:
+        # This cleanup is still essential
         if "default" in unet.peft_config:
             unet.delete_adapters(["default"])
             print("Cleaned up temporary training adapter.")
+            
+    return lora_state_dict
