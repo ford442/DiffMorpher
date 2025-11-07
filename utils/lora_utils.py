@@ -158,5 +158,5 @@ def train_lora_xl(
         print(f"LoRA saved to {save_path}")
     finally:
         if "default" in unet.peft_config:
-            unet.delete_adapter("default")
+            unet.delete_adapters(["default"]) # <--- THIS IS THE CORRECTED LINE
             print("Cleaned up temporary training adapter.")
