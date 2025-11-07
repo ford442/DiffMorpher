@@ -248,7 +248,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         return latent
 
     # SDXL Change: cal_latent needs to interpolate both sets of embeddings
-@torch.no_grad()
+    @torch.no_grad()
     def cal_latent(self, num_inference_steps, guidance_scale, unconditioning, 
                    img_noise_0, img_noise_1, 
                    prompt_embeds_0, pooled_embeds_0,  # SDXL Change
