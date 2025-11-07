@@ -135,5 +135,5 @@ images = pipeline(
     use_lora=not args.no_lora,
     guidance_scale=7.5 # SDXL Change: Set a good default CFG
 )
-images 0 .save(f"{args.output_path}/output.gif", save_all=True,
+images[0].save(f"{args.output_path}/output.gif", save_all=True,
                append_images=images[1:], duration=args.duration, loop=0)
