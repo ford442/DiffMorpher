@@ -71,6 +71,7 @@ def train_lora_xl(
     text_encoder_2.requires_grad_(False)
     unet.requires_grad_(False)
     
+    lora_state_dict = None
     try:
         unet.train()
         lora_config = LoraConfig(
@@ -142,12 +143,13 @@ def train_lora_xl(
 
         # --- Save the LoRA ---
         unet = accelerator.unwrap_model(unet)
-        # Use the official diffusers save method
-        unet.save_pretrained(save_path)
+        lora_state_dict = get_peft_model_state_dict(unet)
 
-        print(f"LoRA saved to {save_path}")
+        # Use the official diffusers save method
     finally:
         # This cleanup is still essential
         if "default" in unet.peft_config:
             unet.delete_adapters(["default"])
             print("Cleaned up temporary training adapter.")
+
+    return lora_state_dict
