@@ -248,7 +248,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         return latent
 
     # SDXL Change: cal_latent needs to interpolate both sets of embeddings
-    @torch.no_grad()
+@torch.no_grad()
     def cal_latent(self, num_inference_steps, guidance_scale, unconditioning, 
                    img_noise_0, img_noise_1, 
                    prompt_embeds_0, pooled_embeds_0,  # SDXL Change
@@ -278,15 +278,15 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
 
         self.scheduler.set_timesteps(num_inference_steps)
+        
         if use_lora:
-        # --- NEW WAY ---
-        if fix_lora is not None:
-            # Fix LoRA to A (0) or B (1)
-            adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
-            self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
-        else:
-            # Interpolate between LoRA A and B using alpha
-            self.unet.set_adapters(["lora_0", "lora_1"], adapter_weights=[1-alpha, alpha])
+            if fix_lora is not None:
+                # Fix LoRA to A (0) or B (1)
+                adapter_name = "lora_0" if fix_lora == 0 else "lora_1"
+                self.unet.set_adapters([adapter_name], adapter_weights=[1.0])
+            else:
+                # Interpolate between LoRA A and B using alpha
+                self.unet.set_adapters(["lora_0", "lora_1"], adapter_weights=[1-alpha, alpha])
 
         for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha}")):
             if guidance_scale > 1.:
