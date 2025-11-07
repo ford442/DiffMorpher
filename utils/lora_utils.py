@@ -12,7 +12,6 @@ from accelerate import Accelerator
 from accelerate.utils import set_seed
 from packaging import version
 import tqdm
-from peft import LoraConfig
 
 from transformers import AutoTokenizer, PretrainedConfig, CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
@@ -128,23 +127,42 @@ def train_lora(
   text_encoder.requires_grad_(False)
   text_encoder_2.requires_grad_(False)
   unet.requires_grad_(False) # Freeze the entire UNet first
-  # 2. Use the modern 'add_adapter' method for LoRA
-  # This replaces the manual loop and 'set_attn_processor'
-  lora_config = LoraConfig(
-      r=lora_rank,
-      lora_alpha=lora_rank, # Often set to the same as rank
-      # This targets the specific layers needed for SDXL attention blocks
-      target_modules=["to_q", "to_k", "to_v", "to_out.0", "add_k_proj", "add_v_proj"],
-  )
-  unet.add_adapter(lora_config)
-  # 3. Gather the trainable LoRA parameters (this part remains conceptually the same)
-  # The '.parameters()' method will now correctly include the new adapter weights.
-  params_to_optimize = []
-  for name, param in unet.named_parameters():
-      if param.requires_grad: # The only params with requires_grad=True are the LoRA ones
-          params_to_optimize.append(param)
-  if not params_to_optimize:
-      raise ValueError("No trainable parameters found. The LoRA adapter may not have been added correctly.")
+# 2. Set up LoRA layers manually
+  unet.train()
+  unet_lora_attn_procs = {}
+  
+  for name, attn_processor in unet.attn_processors.items():
+      cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+      if name.startswith("mid_block"):
+          hidden_size = unet.config.block_out_channels[-1]
+      elif name.startswith("up_blocks"):
+          block_id = int(name[len("up_blocks.")])
+          hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+      elif name.startswith("down_blocks"):
+          block_id = int(name[len("down_blocks.")])
+          hidden_size = unet.config.block_out_channels[block_id]
+      else:
+          hidden_size = unet.config.block_out_channels[0] # Fallback
+
+      # Use the correct processor class for SDXL (with added KV)
+      if cross_attention_dim is None:
+          attn_procs_class = LoRAAttnProcessor
+      else:
+          attn_procs_class = LoRAAttnAddedKVProcessor
+          
+      unet_lora_attn_procs[name] = attn_procs_class(
+          hidden_size=hidden_size, 
+          cross_attention_dim=cross_attention_dim, 
+          rank=lora_rank
+      )
+  
+  unet.set_attn_processor(unet_lora_attn_procs)
+  
+  # 3. Gather trainable parameters by name
+  params_to_optimize = [
+      param for name, param in unet.named_parameters() if "lora" in name
+  ]
+    
   # 4. Optimizer creation (remains the same)
   optimizer = torch.optim.AdamW(
       params_to_optimize,
@@ -219,12 +237,17 @@ def train_lora(
       lr_scheduler.step()
       optimizer.zero_grad()
 
-  # 9. Save weights using the modern method
+# 9. Save weights using the old (manual) method
   unet = accelerator.unwrap_model(unet)
-  # This is the new, correct way to save LoRA weights from a model
-  # that has an adapter attached.
-  unet.save_adapter(
-      save_directory=save_lora_dir,
-      adapter_name=weight_name, # Use weight_name as the adapter name
-      safe_serialization=safe_serialization
-  )
+  
+  # Get the state dictionary for the manual attention processors
+  lora_state_dict = AttnProcsLayers(unet.attn_processors).state_dict()
+  
+  save_path = os.path.join(save_lora_dir, weight_name)
+
+  # Manually save the state dict
+  if safe_serialization:
+      import safetensors
+      safetensors.torch.save_file(lora_state_dict, save_path)
+  else:
+      torch.save(lora_state_dict, save_path)
