@@ -251,3 +251,20 @@ def train_lora(
       safetensors.torch.save_file(lora_state_dict, save_path)
   else:
       torch.save(lora_state_dict, save_path)
+      
+def load_lora(unet, lora_0, lora_1, alpha):
+    """
+    Manually interpolates and loads LoRA weights.
+    """
+    lora = {}
+    
+    # Interpolate between the two LoRA state dictionaries
+    for key in lora_0:
+        if key in lora_1:
+            lora[key] = (1 - alpha) * lora_0[key] + alpha * lora_1[key]
+        else:
+            lora[key] = lora_0[key] # Fallback if keys don't match
+            
+    # Load the interpolated weights using the "old" method
+    unet.load_attn_procs(lora)
+    return unet
