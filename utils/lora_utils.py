@@ -60,11 +60,11 @@ def train_lora_xl(
     set_seed(42)
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
-        mixed_precision="bf16", # Use bfloat16 for speed and memory
+        mixed_precision="bf16",
     )
     device = accelerator.device
     weight_dtype = torch.bfloat16
-
+    
     # --- Freeze Models ---
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
@@ -79,75 +79,84 @@ def train_lora_xl(
         init_lora_weights="gaussian",
         target_modules=["to_k", "to_q", "to_v", "to_out.0"],
     )
-    unet.add_adapter(lora_config)
     
-    # --- Prepare Models for Training ---
-    unet.to(device, dtype=weight_dtype)
-    vae.to(device, dtype=weight_dtype)
-    text_encoder.to(device, dtype=weight_dtype)
-    text_encoder_2.to(device, dtype=weight_dtype)
-
-    # --- Optimizer ---
-    lora_layers = filter(lambda p: p.requires_grad, unet.parameters())
-    optimizer = torch.optim.AdamW(lora_layers, lr=lora_lr)
-    
-    # --- Prepare with Accelerator ---
-    unet, optimizer = accelerator.prepare(unet, optimizer)
-
-    # --- Prepare Data ---
-    with torch.no_grad():
-        prompt_embeds, pooled_embeds = encode_prompt_xl(
-            text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
-        )
-        add_time_ids = get_add_time_ids((1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, device=device)
-    
-    added_cond_kwargs = {"text_embeds": pooled_embeds, "time_ids": add_time_ids}
-    
-    image_transforms = transforms.Compose([
-        transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILINEAR),
-        transforms.CenterCrop(1024),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5]),
-    ])
-    train_image = image_transforms(image).unsqueeze(0).to(device, dtype=weight_dtype)
-
-    with torch.no_grad():
-        latents = vae.encode(train_image).latent_dist.sample()
-        latents = latents * vae.config.scaling_factor
-
-    noise_scheduler = DDPMScheduler.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="scheduler")
-
-    # --- Training Loop ---
-    progress_bar = tqdm(range(lora_steps), desc=f"Training {weight_name}")
-    for step in range(lora_steps):
-        with accelerator.accumulate(unet):
-            noise = torch.randn_like(latents)
-            timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (1,), device=device).long()
-            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
-
-            model_pred = unet(
-                noisy_latents,
-                timesteps,
-                encoder_hidden_states=prompt_embeds,
-                added_cond_kwargs=added_cond_kwargs
-            ).sample
-            
-            loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
-            
-            accelerator.backward(loss)
-            optimizer.step()
-            optimizer.zero_grad()
+    # We use a try...finally block to ensure the adapter is removed after training
+    try:
+        # Add the temporary adapter for training. It will be named "default".
+        unet.add_adapter(lora_config)
         
-        progress_bar.update(1)
-        progress_bar.set_postfix(loss=loss.detach().item())
+        # --- Prepare Models for Training ---
+        unet.to(device, dtype=weight_dtype)
+        vae.to(device, dtype=weight_dtype)
+        text_encoder.to(device, dtype=weight_dtype)
+        text_encoder_2.to(device, dtype=weight_dtype)
 
-    # --- Save the LoRA ---
-    unet = accelerator.unwrap_model(unet)
-    lora_state_dict = get_peft_model_state_dict(unet)
-    
-    save_path = os.path.join(save_lora_dir, weight_name)
-    
-    # Use the official diffusers save method
-    unet.save_attn_procs(save_lora_dir, safe_serialization=True, state_dict=lora_state_dict)
+        # --- Optimizer ---
+        lora_layers = filter(lambda p: p.requires_grad, unet.parameters())
+        optimizer = torch.optim.AdamW(lora_layers, lr=lora_lr)
+        
+        # --- Prepare with Accelerator ---
+        unet, optimizer = accelerator.prepare(unet, optimizer)
 
-    print(f"LoRA saved to {save_path}")
+        # --- Prepare Data ---
+        with torch.no_grad():
+            prompt_embeds, pooled_embeds = encode_prompt_xl(
+                text_encoder, text_encoder_2, tokenizer, tokenizer_2, prompt
+            )
+            add_time_ids = get_add_time_ids((1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, device=device)
+        
+        added_cond_kwargs = {"text_embeds": pooled_embeds, "time_ids": add_time_ids}
+        
+        image_transforms = transforms.Compose([
+            transforms.Resize(1024, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(1024),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ])
+        train_image = image_transforms(image).unsqueeze(0).to(device, dtype=weight_dtype)
+
+        with torch.no_grad():
+            latents = vae.encode(train_image).latent_dist.sample()
+            latents = latents * vae.config.scaling_factor
+
+        noise_scheduler = DDPMScheduler.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="scheduler")
+
+        # --- Training Loop ---
+
+        progress_bar = tqdm(range(lora_steps), desc=f"Training {weight_name}")
+        for step in range(lora_steps):
+            with accelerator.accumulate(unet):
+                noise = torch.randn_like(latents)
+                timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (1,), device=device).long()
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+                model_pred = unet(
+                    noisy_latents,
+                    timesteps,
+                    encoder_hidden_states=prompt_embeds,
+                    added_cond_kwargs=added_cond_kwargs
+                ).sample
+            
+                loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+            
+                accelerator.backward(loss)
+                optimizer.step()
+                optimizer.zero_grad()
+        
+            progress_bar.update(1)
+            progress_bar.set_postfix(loss=loss.detach().item())
+
+        # --- Save the LoRA ---
+        unet = accelerator.unwrap_model(unet)
+        lora_state_dict = get_peft_model_state_dict(unet, adapter_name="default")
+    
+        save_path = os.path.join(save_lora_dir, weight_name)
+    
+        # Use the official diffusers save method
+        unet.save_attn_procs(save_lora_dir, weight_name=weight_name, safe_serialization=True, state_dict=lora_state_dict)
+
+        print(f"LoRA saved to {save_path}")
+    finally:
+        if "default" in unet.peft_config:
+            unet.delete_adapter("default")
+            print("Cleaned up temporary training adapter.")
