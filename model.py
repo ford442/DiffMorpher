@@ -373,9 +373,9 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         if self.use_lora:
             print("Loading and fusing LoRA adapters...")
             # Load the first LoRA with a specific adapter name
-            self.load_lora_weights(load_lora_path_0, adapter_name="lora_0")  2 
+            self.load_lora_weights(load_lora_path_0, adapter_name="lora_0")
             # Load the second LoRA with another adapter name
-            self.load_lora_weights(load_lora_path_1, adapter_name="lora_1")  2 
+            self.load_lora_weights(load_lora_path_1, adapter_name="lora_1")
 
             # The key change: Combine adapters. This prepares the UNet to accept weights for both.
             self.set_adapters(["lora_0", "lora_1"])
