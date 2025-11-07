@@ -100,7 +100,7 @@ def train_lora(
   lora_steps=200, lora_lr=2e-4, lora_rank=16,
   weight_name=None, safe_serialization=False, progress=tqdm
 ):
-  accelerator = Accelerator(gradient_accumulation_steps=1, cpu_offload=True)
+  accelerator = Accelerator(gradient_accumulation_steps=1)
   set_seed(0)
   weight_dtype = torch.bfloat16
   if tokenizer is None:
@@ -119,7 +119,7 @@ def train_lora(
   noise_scheduler = DDPMScheduler.from_pretrained('ford442/RealVisXL_V5.0_BF16', subfolder="scheduler")
   device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
   unet_dtype = weight_dtype
-  vae.to(device, weight_dtype)
+  vae.to(weight_dtype)
   text_encoder.to(device)
   text_encoder_2.to(device)
   unet.to(device, weight_dtype)
