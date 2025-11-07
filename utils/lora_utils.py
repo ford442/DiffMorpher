@@ -146,7 +146,7 @@ def train_lora_xl(
         lora_state_dict = get_peft_model_state_dict(unet)
        
         # Use the official diffusers save method
-        unet.save_lora_adapter(save_path, adapter_name="default")
+        unet.save_pretrained(save_path)
 
         print(f"LoRA saved to {save_path}")
     finally:
