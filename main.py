@@ -90,7 +90,6 @@ pipeline.enable_model_cpu_offload()
 # This is a bit of a hack, but simpler than refactoring model_xl.py
 import model
 model.train_lora = utils.lora_utils.train_lora
-model.load_lora = utils.lora_utils.load_lora
 
 images = pipeline(
     img_path_0=args.image_path_0,
