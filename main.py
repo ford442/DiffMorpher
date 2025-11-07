@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 from PIL import Image
 from argparse import ArgumentParser
-from model import DiffMorpherPipelineXL 
+from model import DiffMorpherPipelineXL
 import utils.lora_utils
 from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler
 from diffusers.schedulers import KarrasDiffusionSchedulers
@@ -92,7 +92,7 @@ text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfold
 tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
 tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer_2")
 unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=dtype)
-scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
+scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler") # Use DDPMScheduler
 
 # 2. Instantiate your custom pipeline class with the components
 pipeline = DiffMorpherPipelineXL(
@@ -107,11 +107,15 @@ pipeline = DiffMorpherPipelineXL(
 
 # 3. Apply your VRAM-saving offload
 pipeline.enable_model_cpu_offload()
+# --- END REPLACEMENT ---
 
 # We need to explicitly point model_xl.py to the new lora_utils_xl
 # This is a bit of a hack, but simpler than refactoring model_xl.py
 import model
+# (This line was likely deleted by mistake, make sure it's present)
 model.train_lora = utils.lora_utils.train_lora
+# (This line should be deleted, as it's part of the old way)
+# model.load_lora = utils.lora_utils.load_lora 
 
 images = pipeline(
     img_path_0=args.image_path_0,
