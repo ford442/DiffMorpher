@@ -6,7 +6,7 @@ from PIL import Image
 from argparse import ArgumentParser
 from model import DiffMorpherPipelineXL 
 import utils.lora_utils
-from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler
 from diffusers.schedulers import KarrasDiffusionSchedulers
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
@@ -92,7 +92,7 @@ text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(model_path, subfold
 tokenizer = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer")
 tokenizer_2 = CLIPTokenizer.from_pretrained(model_path, subfolder="tokenizer_2")
 unet = UNet2DConditionModel.from_pretrained(model_path, subfolder="unet", torch_dtype=dtype)
-scheduler = KarrasDiffusionSchedulers.from_pretrained(model_path, subfolder="scheduler")
+scheduler = DDPMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
 # 2. Instantiate your custom pipeline class with the components
 pipeline = DiffMorpherPipelineXL(
