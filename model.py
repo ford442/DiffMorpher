@@ -164,7 +164,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         return image
 
     @torch.no_grad()
-    def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
+    def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds, guidance_scale):
         # Force "cuda" as the target device for computation, bypassing self.device issues.
         device = torch.device("cuda")
         unet_dtype = self.unet.dtype # DEFINES the variable
