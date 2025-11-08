@@ -161,18 +161,22 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
         # Force "cuda" as the target device for computation, bypassing self.device issues.
         device = torch.device("cuda")
-        latent = latent.to(device)
-        prompt_embeds = prompt_embeds.to(device)
-        pooled_prompt_embeds = pooled_prompt_embeds.to(device)
+        latent = latent.to(device=device, dtype=unet_dtype)
+        prompt_embeds = prompt_embeds.to(device=device, dtype=unet_dtype)
+        pooled_prompt_embeds = pooled_prompt_embeds.to(device=device, dtype=unet_dtype)
+        # --- END DTYPE FIX ---
 
         timesteps = reversed(self.scheduler.timesteps)
+
         
         add_time_ids = self._get_add_time_ids(
-            (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, text_encoder_projection_dim=self.text_encoder_projection_dim
+            (1024, 1024), (0, 0), (1024, 1024),
+            dtype=unet_dtype, # Use the correct dtype
+            text_encoder_projection_dim=self.text_encoder_projection_dim
         ).to(device)
         
         added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
-        
+    
         for i, t in enumerate(tqdm.tqdm(timesteps, desc="DDIM inversion")):
             timestep_gpu = t.to(device)
 
@@ -182,6 +186,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 encoder_hidden_states=prompt_embeds, 
                 added_cond_kwargs=added_cond_kwargs
             ).sample
+
             
             prev_timestep = t - self.scheduler.config.num_train_timesteps // self.scheduler.num_inference_steps
             
@@ -198,22 +203,25 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
         return latent
 
-    @torch.no_grad()
-    def cal_latent(self, num_inference_steps, guidance_scale, unconditioning,
+        @torch.no_grad()
+        def cal_latent(self, num_inference_steps, guidance_scale, unconditioning,
                    img_noise_0, img_noise_1,
                    prompt_embeds_0, pooled_embeds_0,
                    prompt_embeds_1, pooled_embeds_1,
                    alpha, use_lora):
         
         device = torch.device("cuda")
+        unet_dtype = self.unet.dtype
 
-        latents = slerp(img_noise_0, img_noise_1, alpha, self.use_adain)
-        
-        prompt_embeds = (1 - alpha) * prompt_embeds_0 + alpha * prompt_embeds_1
-        pooled_embeds = (1 - alpha) * pooled_embeds_0 + alpha * pooled_embeds_1
+        latents = slerp(img_noise_0, img_noise_1, alpha, self.use_adain).to(unet_dtype)
+    
+        prompt_embeds = ((1 - alpha) * prompt_embeds_0 + alpha * prompt_embeds_1).to(unet_dtype)
+        pooled_embeds = ((1 - alpha) * pooled_embeds_0 + alpha * pooled_embeds_1).to(unet_dtype)
 
         add_time_ids = self._get_add_time_ids(
-            (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, text_encoder_projection_dim=self.text_encoder_projection_dim
+            (1024, 1024), (0, 0), (1024, 1024),
+            dtype=unet_dtype, # Use the correct dtype here as well
+            text_encoder_projection_dim=self.text_encoder_projection_dim
         ).to(device)
         
         added_cond_kwargs = {"text_embeds": pooled_embeds, "time_ids": add_time_ids}
