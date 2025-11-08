@@ -240,13 +240,13 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
     
         # The original code had a bug here, this is the corrected loop
         for i, t in enumerate(tqdm.tqdm(timesteps, desc="DDIM inversion")):
-            # 1. predict noise
+            timestep = t.to(self.device)
             eps = self.unet(
-                latent, 
-                t, 
-                encoder_hidden_states=prompt_embeds, 
-                added_cond_kwargs=added_cond_kwargs
-            ).sample
+            latent, 
+            timestep,  # <-- This must be `timestep`, not `t`
+            encoder_hidden_states=prompt_embeds, 
+            added_cond_kwargs=added_cond_kwargs
+        ).sample
 
             # --- START NEW FIX ---
             # Move eps (UNet output) to the correct device *before* using it.
@@ -316,9 +316,11 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha:.2f}")):
             model_inputs = torch.cat([latents] * 2) if guidance_scale > 1. else latents
             timestep = t.to(self.device)
+            # --- END FIX ---
+    
             noise_pred = self.unet(
                 model_inputs,
-                t,
+                timestep, # <-- This must be `timestep`, not `t`
                 encoder_hidden_states=prompt_embeds,
                 added_cond_kwargs=added_cond_kwargs
             ).sample
