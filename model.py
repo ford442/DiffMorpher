@@ -78,7 +78,7 @@ class LoadProcessor():
 
 class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
-    def __init__(
+def __init__(
         self,
         vae: AutoencoderKL,
         text_encoder: CLIPTextModel,
@@ -101,6 +101,18 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
+        
+        # --- FIX: Manually set the projection dim ---
+        # This value is required by SDXL but isn't set
+        # by the super().__init__ when passed components manually.
+        if hasattr(self.text_encoder_2, "config") and self.text_encoder_2.config.projection_dim is not None:
+             self.text_encoder_projection_dim = self.text_encoder_2.config.projection_dim
+        else:
+             # Fallback value if config is somehow missing, 1280 is standard for SDXL
+             print("Warning: text_encoder_2.config.projection_dim not found, using fallback 1280.")
+             self.text_encoder_projection_dim = 1280 
+        # --- END FIX ---
+
         self.img0_dict = dict()
         self.img1_dict = dict()
         
