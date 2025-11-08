@@ -20,17 +20,22 @@ from utils.lora_utils import train_lora_xl
 from utils.alpha_scheduler import AlphaScheduler
 
 class StoreProcessor():
-    def __init__(self, original_processor, value_dict, name):
+    def __init__(self, original_processor, value_dict, name, num_steps=50, lamd=0.6):
         self.original_processor = original_processor
         self.value_dict = value_dict
         self.name = name
         self.value_dict[self.name] = dict()
         self.id = 0
+        # Calculate the step limit based on lamd
+        self.limit = int(num_steps * lamd)
 
     def __call__(self, attn, hidden_states, *args, encoder_hidden_states=None, attention_mask=None, **kwargs):
         if encoder_hidden_states is None:
-            self.value_dict[self.name][self.id] = hidden_states.detach().cpu() # <-- MODIFIED: Move to CPU
-            self.id += 1
+            # Only store the map if we are under the step limit
+            if self.id < self.limit:
+                self.value_dict[self.name][self.id] = hidden_states.detach().cpu()
+            # Always increment the ID to match the LoadProcessor
+            self.id += 1 
         res = self.original_processor(attn, hidden_states, *args,
                                       encoder_hidden_states=encoder_hidden_states,
                                       attention_mask=attention_mask,
@@ -323,11 +328,18 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             attn_processor_dict = {}
             for k in self.unet.attn_processors.keys():
                 if do_replace_attn(k):
-                    attn_processor_dict[k] = StoreProcessor(self.unet.attn_processors[k], self.img0_dict, k)
+                    # MODIFIED: Pass num_inference_steps and lamd to limit RAM usage
+                    attn_processor_dict[k] = StoreProcessor(
+                        self.unet.attn_processors[k], 
+                        self.img0_dict, 
+                        k, 
+                        num_steps=num_inference_steps, 
+                        lamd=lamd
+                    )
                 else:
                     attn_processor_dict[k] = self.unet.attn_processors[k]
             self.unet.set_attn_processor(attn_processor_dict)
-
+            
             latents_0 = self.cal_latent(
                 num_inference_steps, guidance_scale, unconditioning,
                 img_noise_0, img_noise_1,
@@ -346,7 +358,14 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             attn_processor_dict = {}
             for k in self.unet.attn_processors.keys():
                 if do_replace_attn(k):
-                    attn_processor_dict[k] = StoreProcessor(self.unet.attn_processors[k], self.img1_dict, k)
+                    # MODIFIED: Pass num_inference_steps and lamd to limit RAM usage
+                    attn_processor_dict[k] = StoreProcessor(
+                        self.unet.attn_processors[k], 
+                        self.img1_dict, 
+                        k, 
+                        num_steps=num_inference_steps, 
+                        lamd=lamd
+                    )
                 else:
                     attn_processor_dict[k] = self.unet.attn_processors[k]
             self.unet.set_attn_processor(attn_processor_dict)
