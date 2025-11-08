@@ -145,14 +145,26 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             image = torch.from_numpy(image).float() / 127.5 - 1
             image = image.permute(2, 0, 1).unsqueeze(0)
         
-        latents = self.vae.encode(image.to(device=device, dtype=self.vae.dtype))['latent_dist'].mean
+        # --- NEW: Force VAE to float32 for stable encoding ---
+        vae_dtype = self.vae.dtype
+        self.vae.to(dtype=torch.float32)
+        
+        # Convert image to float32 to match VAE
+        image = image.to(device=device, dtype=torch.float32)
+        
+        latents = self.vae.encode(image)['latent_dist'].mean
+        
+        # Restore VAE to original dtype
+        self.vae.to(dtype=vae_dtype)
+        # --- END NEW ---
+        
         latents = latents * self.vae.config.scaling_factor
         return latents
 
     @torch.no_grad()
     def latent2image(self, latents, return_type='np'):
         # --- MODIFIED: Force VAE to float32 for high-quality decoding ---
-
+        
         # 1. Store original dtype and move VAE to float32
         vae_dtype = self.vae.dtype
         self.vae.to(dtype=torch.float32)
@@ -162,7 +174,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
         latents = latents / self.vae.config.scaling_factor
         image = self.vae.decode(latents)['sample']
-
+        
         # 3. Restore the VAE to its original dtype
         self.vae.to(dtype=vae_dtype)
         # --- END MODIFICATION ---
