@@ -391,7 +391,6 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             lora_dir_name_0 = f"{os.path.splitext(os.path.basename(img_path_0))[0]}_lora.safetensors"
             final_lora_path_0 = os.path.join(save_lora_dir, lora_dir_name_0)
 
-
             if not os.path.exists(final_lora_path_0):
                 print(f"Training LoRA for image 0...")
                 lora_state_dict = train_lora_xl(
@@ -460,11 +459,35 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         img_1 = get_img(img_1) # Uses get_img from model_utils_xl (1024)
         
         if self.use_lora:
-            # Set adapter to fully use lora_1 for the second image inversion
-            self.set_adapters(["lora_1"], adapter_weights=[1.0])
-        img_noise_1 = self.ddim_inversion(
-            self.image2latent(img_1), prompt_embeds_1, pooled_embeds_1)
+            # Ensure the correct LoRA is active for the inversion
+            self.set_adapters(["lora_0"], adapter_weights=[1.0])
 
+        # Slice the tensors to get only the conditional embeddings
+        cond_prompt_embeds_0 = prompt_embeds_0[1:2]
+        cond_pooled_embeds_0 = pooled_embeds_0[1:2]
+
+        print("Inverting image 0...")
+        img_noise_0 = self.ddim_inversion(
+            self.image2latent(img_0), cond_prompt_embeds_0, cond_pooled_embeds_0)
+
+
+        # 2. Perform DDIM Inversion for the second image (where the original error occurred)
+        if self.use_lora:
+            # Switch to the LoRA for the second image
+            self.set_adapters(["lora_1"], adapter_weights=[1.0])
+
+        # Slice the tensors to get only the conditional embeddings
+        cond_prompt_embeds_1 = prompt_embeds_1[1:2]
+        cond_pooled_embeds_1 = pooled_embeds_1[1:2]
+
+        print("Inverting image 1...")
+        img_noise_1 = self.ddim_inversion(
+            self.image2latent(img_1), cond_prompt_embeds_1, cond_pooled_embeds_1)
+
+        # --- END FIX ---
+
+        # The code from this point was trying to use img_noise_0 and img_noise_1
+        # and should now work correctly.
         print("latents shape: ", img_noise_0.shape)
         
         original_processor = list(self.unet.attn_processors.values())[0]
