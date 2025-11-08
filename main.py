@@ -116,7 +116,7 @@ pipeline.enable_model_cpu_offload()
 # yet because we will immediately override this behavior with offloading.
 # This is the critical step that was missing.
 print("Setting pipeline target device to 'cuda'...")
-pipeline.device = torch.device("cuda")
+pipeline._device = torch.device("cuda")
 # We need to explicitly point model_xl.py to the new lora_utils_xl
 # This is a bit of a hack, but simpler than refactoring model_xl.py
 import model
