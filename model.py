@@ -225,7 +225,9 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             dtype=unet_dtype, # Use the correct dtype here as well
             text_encoder_projection_dim=self.text_encoder_projection_dim
         ).to(device)
-        
+        if guidance_scale > 1.0:
+            add_time_ids = torch.cat([add_time_ids, add_time_ids], dim=0)
+
         added_cond_kwargs = {"text_embeds": pooled_embeds, "time_ids": add_time_ids}
         
         self.scheduler.set_timesteps(num_inference_steps)
