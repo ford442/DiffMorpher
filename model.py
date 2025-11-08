@@ -388,7 +388,9 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         self.use_adain = use_adain
         self.use_reschedule = use_reschedule
         self.output_path = output_path
-        
+                
+        self.scheduler.alphas_cumprod = self.scheduler.alphas_cumprod.to(self.device)
+
         if img_0 is None: img_0 = Image.open(img_path_0).convert("RGB")
         if img_1 is None: img_1 = Image.open(img_path_1).convert("RGB")
             
