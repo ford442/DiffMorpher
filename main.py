@@ -141,7 +141,22 @@ images = pipeline(
     fix_lora=args.fix_lora_value,
     save_intermediates=args.save_inter,
     use_lora=not args.no_lora,
-    guidance_scale=7.5 # SDXL Change: Set a good default CFG
+    guidance_scale=3.7 # SDXL Change: Set a good default CFG
 )
+
 images[0].save(f"{args.output_path}/output.gif", save_all=True,
                append_images=images[1:], duration=args.duration, loop=0)
+print(f'Saving {args.num_frames} frames to MP4...')
+# Calculate FPS from the duration (milliseconds per frame)
+fps = 1000.0 / args.duration
+video_path = f'{args.output_path}/output.mp4'
+# Ensure the output directory exists
+os.makedirs(args.output_path, exist_ok=True)
+# Use float for fps and (512, 512) for frame size
+video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), float(fps), (512, 512))
+for i, image in enumerate(images):
+    # Convert PIL image to numpy array and from RGB to BGR for cv2
+    video.write(cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR))
+video.release()
+cv2.destroyAllWindows()
+print(f'Successfully saved MP4 to {video_path}')
