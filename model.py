@@ -138,16 +138,31 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         return comps
     
     @torch.no_grad()
-    def image2latent(self, image):
-        device = self._device # Use the pipeline's internal device
-        if isinstance(image, Image.Image):
-            image = np.array(image)
-            image = torch.from_numpy(image).float() / 127.5 - 1
-            image = image.permute(2, 0, 1).unsqueeze(0)
-        
-        latents = self.vae.encode(image.to(device=device, dtype=self.vae.dtype))['latent_dist'].mean
-        latents = latents * self.vae.config.scaling_factor
-        return latents
+    def latent2image(self, latents, return_type='np'):
+        # --- MODIFIED: Force VAE to float32 for high-quality decoding ---
+
+        # 1. Store original dtype and move VAE to float32
+        vae_dtype = self.vae.dtype
+        self.vae.to(dtype=torch.float32)
+
+        # 2. Also cast the latents to float32 to match the VAE
+        latents = latents.to(dtype=torch.float32)
+
+        latents = latents / self.vae.config.scaling_factor
+        image = self.vae.decode(latents)['sample']
+
+        # 3. Restore the VAE to its original dtype
+        self.vae.to(dtype=vae_dtype)
+        # --- END MODIFICATION ---
+
+        if return_type == 'np':
+            image = (image / 2 + 0.5).clamp(0, 1)
+            image = image.cpu().permute(0, 2, 3, 1).numpy()[0]
+            image = (image * 255).astype(np.uint8)
+        elif return_type == "pt":
+            image = (image / 2 + 0.5).clamp(0, 1)
+
+        return image
 
     @torch.no_grad()
     def latent2image(self, latents, return_type='np'):
