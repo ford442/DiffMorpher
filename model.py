@@ -72,9 +72,9 @@ class LoadProcessor():
                                               attention_mask=attention_mask,
                                               **kwargs)
             self.id += 1
-                    # Reset the ID when it reaches the end of the 50-step sequence
-                    if self.id == 50: 
-                        self.id = 0
+            # Reset the ID when it reaches the end of the 50-step sequence
+            if self.id == 50: 
+                    self.id = 0
         else:
             res = self.original_processor(attn, hidden_states, *args,
                                           encoder_hidden_states=encoder_hidden_states,
