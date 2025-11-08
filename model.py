@@ -389,12 +389,14 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     tokenizer=self.tokenizer, tokenizer_2=self.tokenizer_2,
                     lora_steps=lora_steps, lora_lr=lora_lr, lora_rank=lora_rank
                 )
-                self.save_lora_weights(
-                    save_directory=os.path.dirname(final_lora_path_0),
-                    weight_name=os.path.basename(final_lora_path_0),
-                    unet_lora_layers=lora_state_dict
-                )
-                print(f"LoRA for image 0 saved to {final_lora_path_0}")
+                # --- The 'lora_state_dict' variable is no longer needed. ---
+                # --- REMOVE the self.save_lora_weights block. ---
+                # self.save_lora_weights(
+                #     save_directory=os.path.dirname(final_lora_path_0),
+                #     weight_name=os.path.basename(final_lora_path_0),
+                #     unet_lora_layers=lora_state_dict
+                # )
+                # print(f"LoRA for image 0 saved to {final_lora_path_0}")
 
             # --- Handle LoRA for Image 1 ---
             lora_dir_name_1 = f"{os.path.splitext(os.path.basename(img_path_1))[0]}_lora.safetensors"
