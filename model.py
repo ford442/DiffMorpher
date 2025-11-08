@@ -176,25 +176,37 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
         timesteps = reversed(self.scheduler.timesteps)
 
-        
         add_time_ids = self._get_add_time_ids(
             (1024, 1024), (0, 0), (1024, 1024),
             dtype=unet_dtype, # Use the correct dtype
             text_encoder_projection_dim=self.text_encoder_projection_dim
         ).to(device)
         
+        if guidance_scale > 1.0:
+            add_time_ids = torch.cat([add_time_ids, add_time_ids], dim=0)
+        # --- END NEW ---
+        
         added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
     
         for i, t in enumerate(tqdm.tqdm(timesteps, desc="DDIM inversion")):
             timestep_gpu = t.to(device)
 
+            # --- NEW: Add CFG logic for model_inputs ---
+            model_inputs = torch.cat([latent] * 2) if guidance_scale > 1. else latent
+            # --- END NEW ---
+
             eps = self.unet(
-                latent, 
+                model_inputs, # MODIFIED: Use model_inputs
                 timestep_gpu,
                 encoder_hidden_states=prompt_embeds, 
                 added_cond_kwargs=added_cond_kwargs
             ).sample
 
+            # --- NEW: Perform CFG calculation ---
+            if guidance_scale > 1.0:
+                noise_pred_uncon, noise_pred_con = eps.chunk(2, dim=0)
+                eps = noise_pred_uncon + guidance_scale * (noise_pred_con - noise_pred_uncon)
+            # --- END NEW ---
             
             prev_timestep = t - self.scheduler.config.num_train_timesteps // self.scheduler.num_inference_steps
             
@@ -474,12 +486,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         if self.use_lora:
             self.set_adapters(["lora_0"], adapter_weights=[1.0])
         print("Inverting image 0...")
-        img_noise_0 = self.ddim_inversion(self.image2latent(img_0_processed), prompt_embeds_0[1:2], pooled_embeds_0[1:2])
+        img_noise_0 = self.ddim_inversion(self.image2latent(img_0_processed), prompt_embeds_0, pooled_embeds_0, guidance_scale)
 
         if self.use_lora:
             self.set_adapters(["lora_1"], adapter_weights=[1.0])
         print("Inverting image 1...")
-        img_noise_1 = self.ddim_inversion(self.image2latent(img_1_processed), prompt_embeds_1[1:2], pooled_embeds_1[1:2])
+        img_noise_1 = self.ddim_inversion(self.image2latent(img_1_processed), prompt_embeds_1, pooled_embeds_1, guidance_scale)
 
         print("Latent noise vectors calculated.")
         
