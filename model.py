@@ -220,7 +220,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         return x_prev, pred_x0   
         
     # SDXL Change: ddim_inversion needs to be updated for dual encoders
-@torch.no_grad()
+    @torch.no_grad()
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
         # --- START ORIGINAL FIX ---
         # Ensure all input tensors to the UNet are on the correct device.
