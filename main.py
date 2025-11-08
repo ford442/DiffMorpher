@@ -169,14 +169,22 @@ images = pipeline(
 
 images[0].save(f"{args.output_path}/output.gif", save_all=True,
                append_images=images[1:], duration=args.duration, loop=0)
+
 print(f'Saving {args.num_frames} frames to MP4...')
 # Calculate FPS from the duration (milliseconds per frame)
 fps = 1000.0 / args.duration
 video_path = f'{args.output_path}/output.mp4'
 # Ensure the output directory exists
 os.makedirs(args.output_path, exist_ok=True)
-# Use float for fps and (512, 512) for frame size
-video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), float(fps), (512, 512))
+
+# --- THIS IS THE FIX ---
+# Get the actual frame size from the first image
+frame_size = (images[0].width, images[0].height)
+# --- END FIX ---
+
+# Use float for fps and the dynamically-fetched frame_size
+video = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*'mp4v'), float(fps), frame_size)
+
 for i, image in enumerate(images):
     # Convert PIL image to numpy array and from RGB to BGR for cv2
     video.write(cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR))
