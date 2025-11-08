@@ -224,11 +224,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
         # --- START ORIGINAL FIX ---
         # Ensure all input tensors to the UNet are on the correct device.
-        device = self.device
+        device = torch.device("cuda") # <-- CHANGE HERE
         latent = latent.to(device)
         prompt_embeds = prompt_embeds.to(device)
         pooled_prompt_embeds = pooled_prompt_embeds.to(device)
         # --- END ORIGINAL FIX ---
+        timestep_gpu = t.to(device) # <-- CHANGE HERE
 
         timesteps = reversed(self.scheduler.timesteps)
     
@@ -302,11 +303,13 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                    prompt_embeds_0, pooled_embeds_0,
                    prompt_embeds_1, pooled_embeds_1,
                    alpha, use_lora): # No more lora_0, lora_1, fix_lora
-        
+        device = torch.device("cuda") # <-- CHANGE HERE
+
         latents = slerp(img_noise_0, img_noise_1, alpha, self.use_adain)
         
         prompt_embeds = (1 - alpha) * prompt_embeds_0 + alpha * prompt_embeds_1
         pooled_embeds = (1 - alpha) * pooled_embeds_0 + alpha * pooled_embeds_1
+        timestep_gpu = t.to(device) # <-- CHANGE HERE
 
         add_time_ids = self._get_add_time_ids(
             (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, text_encoder_projection_dim=self.text_encoder_projection_dim
@@ -327,7 +330,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         
         for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha:.2f}")):
             model_inputs = torch.cat([latents] * 2) if guidance_scale > 1. else latents
-            timestep = t.to(self.device)
+            timestep = t.to(device)
             # --- END FIX ---
     
             noise_pred = self.unet(
