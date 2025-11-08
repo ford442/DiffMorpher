@@ -72,8 +72,9 @@ class LoadProcessor():
                                               attention_mask=attention_mask,
                                               **kwargs)
             self.id += 1
-            if self.id == len(self.img0_dict[self.name]):
-                self.id = 0
+                    # Reset the ID when it reaches the end of the 50-step sequence
+                    if self.id == 50: 
+                        self.id = 0
         else:
             res = self.original_processor(attn, hidden_states, *args,
                                           encoder_hidden_states=encoder_hidden_states,
@@ -437,20 +438,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     image.save(f"{self.output_path}/{i:02d}.png")
                 images.append(image)
 
-        # --- NEW: Cleanup to prevent OOM ---
-        # Clear the large attention map dictionaries
-        self.img0_dict.clear()
-        self.img1_dict.clear()
-        
-        # Force Python's garbage collector to run
-        import gc
-        gc.collect()
-        
-        # Clear the PyTorch CUDA cache
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        # --- END NEW ---
-            
+
         return images
         
     def __call__(
@@ -552,5 +540,19 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             else:
                 alpha_list = list(torch.linspace(0, 1, num_frames))
                 images = self._morph(alpha_list, progress, "Sampling...", **morph_kwargs)
+                
+        # --- NEW: Final cleanup a_morph_kwargs)
+        # Clear the large attention map dictionaries
+        self.img0_dict.clear()
+        self.img1_dict.clear()
+        
+        # Force Python's garbage collector to run
+        import gc
+        gc.collect()
+        
+        # Clear the PyTorch CUDA cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # --- END NEW ---
 
         return images
