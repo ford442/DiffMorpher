@@ -227,7 +227,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         # SDXL Change: Prepare added_cond_kwargs
         # We assume default resolution 1024x1024, no cropping
         add_time_ids = self._get_add_time_ids(
-            (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype
+            (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, text_encoder_projection_dim=self.text_encoder_projection_dim
         ).to(self.device)
         
         added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
@@ -273,7 +273,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         pooled_embeds = (1 - alpha) * pooled_embeds_0 + alpha * pooled_embeds_1
 
         add_time_ids = self._get_add_time_ids(
-            (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype
+            (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, text_encoder_projection_dim=self.text_encoder_projection_dim
         ).to(self.device)
         
         # Correct handling of CFG for pooled embeddings
