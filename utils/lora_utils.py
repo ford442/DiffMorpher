@@ -144,11 +144,11 @@ def train_lora_xl(
         # --- Save the LoRA ---
         unet = accelerator.unwrap_model(unet)
         lora_state_dict = get_peft_model_state_dict(unet)
-        return lora_state_dict
+
         # Use the official diffusers save method
     finally:
         # This cleanup is still essential
         if "default" in unet.peft_config:
             unet.delete_adapters(["default"])
             print("Cleaned up temporary training adapter.")
-
+    return lora_state_dict
