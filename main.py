@@ -1,5 +1,28 @@
 import os
 import torch
+
+os.environ['PYTORCH_NVML_BASED_CUDA_CHECK'] = '1'
+os.environ['TORCH_LINALG_PREFER_CUSOLVER'] = '1'
+os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True,pinned_use_background_threads:True'
+os.environ["SAFETENSORS_FAST_GPU"] = "1"
+os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '1'
+
+torch.backends.cuda.matmul.allow_tf32 = False  #  torch 2.8
+torch.backends.cudnn.allow_tf32 = False        #  torch 2.8
+
+torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+#torch.backends.fp32_precision = "ieee"  torch 2.9
+#torch.backends.cuda.matmul.fp32_precision = "ieee"  torch 2.9
+#torch.backends.cudnn.fp32_precision = "ieee"  torch 2.9
+#torch.backends.cudnn.conv.fp32_precision = "ieee"  torch 2.9
+#torch.backends.cudnn.rnn.fp32_precision = "ieee"  torch 2.9
+torch.backends.cudnn.deterministic = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cuda.preferred_blas_library="cublas"
+torch.backends.cuda.preferred_linalg_library="cusolver"
+torch.set_float32_matmul_precision("highest")
+
 import numpy as np
 import cv2
 from PIL import Image
