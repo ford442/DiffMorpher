@@ -3,6 +3,7 @@ from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.attention_processor import AttnProcessor
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from diffusers.schedulers import KarrasDiffusionSchedulers, DDPMScheduler
+from diffusers.image_processor import VaeImageProcessor
 import torch
 import torch.nn.functional as F
 import tqdm
@@ -86,11 +87,15 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         tokenizer: CLIPTokenizer,
         tokenizer_2: CLIPTokenizer,
         unet: UNet2DConditionModel,
-        scheduler: DDPMScheduler,
+        scheduler: KarrasDiffusionSchedulers,
+        image_encoder: None,
         feature_extractor: CLIPImageProcessor = None,
-        image_encoder=None,
+        force_zeros_for_empty_prompt: bool = True,
+        add_watermarker: bool = False,
     ):
-        super().__init__(
+        # The StableDiffusionXLPipeline __init__ method is not called to avoid the
+        # config introspection bug. Instead, we copy the necessary initialization logic.
+        self.register_modules(
             vae=vae,
             text_encoder=text_encoder,
             text_encoder_2=text_encoder_2,
@@ -101,6 +106,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
+        self.register_to_config(force_zeros_for_empty_prompt=force_zeros_for_empty_prompt)
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
+        self.default_sample_size = self.unet.config.sample_size
+
+        # Custom properties for DiffMorpher
         self.img0_dict = dict()
         self.img1_dict = dict()
         
