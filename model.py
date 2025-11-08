@@ -240,19 +240,31 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
     
         # The original code had a bug here, this is the corrected loop
         for i, t in enumerate(tqdm.tqdm(timesteps, desc="DDIM inversion")):
-            timestep = t.to(self.device)
-            eps = self.unet(
-            latent, 
-            timestep,  # <-- This must be `timestep`, not `t`
-            encoder_hidden_states=prompt_embeds, 
-            added_cond_kwargs=added_cond_kwargs
-        ).sample
 
-            # --- START NEW FIX ---
-            # Move eps (UNet output) to the correct device *before* using it.
-            # With offloading, eps is often returned on the CPU.
-            eps = eps.to(device)
-            # --- END NEW FIX ---
+            # 1. ADD THIS PRINT BLOCK to inspect the device of every input tensor.
+            if i == 0: # Only print for the first step to avoid clutter
+                print("\n" + "="*50)
+                print("--- DEBUGGING TENSOR DEVICES (First Step) ---")
+                print(f"  - Target Computation Device (self.device): {self.device}")
+                print(f"  - Latent 'latent' device:                  {latent.device}")
+                print(f"  - Timestep 't' device (from loop):         {t.device}")
+                print(f"  - Encoder Hidden States 'prompt_embeds':   {prompt_embeds.device}")
+                print(f"  - Added Cond 'pooled_prompt_embeds':       {pooled_prompt_embeds.device}")
+                print("="*50 + "\n")
+
+            # 2. THIS IS THE FIX: Move the CPU timestep 't' to the GPU.
+            #    We create a new variable `timestep_gpu` to hold the result.
+            timestep_gpu = t.to(device)
+
+            # 3. CALL THE UNET using the new `timestep_gpu` variable.
+            #    The error you are seeing can ONLY happen if `t` is used here instead.
+            eps = self.unet(
+                latent, 
+                timestep_gpu,  # <-- CRITICAL: Use the GPU tensor here.
+                encoder_hidden_states=prompt_embeds, 
+                added_cond_kwargs=added_cond_kwargs
+            ).sample
+        
 
             # 2. get previous timestep
             prev_timestep = t - self.scheduler.config.num_train_timesteps // self.scheduler.num_inference_steps
