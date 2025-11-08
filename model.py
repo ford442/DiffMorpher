@@ -220,16 +220,15 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         return x_prev, pred_x0   
         
     # SDXL Change: ddim_inversion needs to be updated for dual encoders
-    @torch.no_grad()
+@torch.no_grad()
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
-        # --- START FIX ---
+        # --- START ORIGINAL FIX ---
         # Ensure all input tensors to the UNet are on the correct device.
-        # This is the most robust way to prevent CPU/CUDA device errors.
         device = self.device
-        latent = latent.to(device)  # <--- The new, critical addition
+        latent = latent.to(device)
         prompt_embeds = prompt_embeds.to(device)
         pooled_prompt_embeds = pooled_prompt_embeds.to(device)
-        # --- END FIX ---
+        # --- END ORIGINAL FIX ---
 
         timesteps = reversed(self.scheduler.timesteps)
     
@@ -249,21 +248,34 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 added_cond_kwargs=added_cond_kwargs
             ).sample
 
+            # --- START NEW FIX ---
+            # Move eps (UNet output) to the correct device *before* using it.
+            # With offloading, eps is often returned on the CPU.
+            eps = eps.to(device)
+            # --- END NEW FIX ---
+
             # 2. get previous timestep
             prev_timestep = t - self.scheduler.config.num_train_timesteps // self.scheduler.num_inference_steps
         
-            # 3. compute alphas for current and previous timesteps
-            alpha_prod_t = self.scheduler.alphas_cumprod[t]
-            alpha_prod_t_prev = (
-                self.scheduler.alphas_cumprod[prev_timestep]
-                if prev_timestep >= 0
-                else self.scheduler.final_alpha_cumprod
-            )
+            # 3. compute alphas, ensuring they are *also* on the correct device
+            # --- START NEW FIX ---
+            # self.scheduler.alphas_cumprod is a CPU tensor, so move the value to the device
+            alpha_prod_t = self.scheduler.alphas_cumprod[t].to(device)
+            
+            # Ensure *both* possible values for alpha_prod_t_prev are moved to the device
+            if prev_timestep >= 0:
+                alpha_prod_t_prev = self.scheduler.alphas_cumprod[prev_timestep].to(device)
+            else:
+                # self.scheduler.final_alpha_cumprod is also a tensor that lives on the CPU
+                alpha_prod_t_prev = self.scheduler.final_alpha_cumprod.to(device)
+            # --- END NEW FIX ---
         
             # 4. compute predicted original sample from predicted noise
+            # This line will now work, as latent, eps, and alpha_prod_t are all on 'device'
             pred_x0 = (latent - (1 - alpha_prod_t) ** 0.5 * eps) / alpha_prod_t ** 0.5
         
             # 5. compute direction pointing to x_t
+            # This also now works, as alpha_prod_t_prev and eps are on the same device
             pred_dir = (1 - alpha_prod_t_prev) ** 0.5 * eps
         
             # 6. compute x_t-1
