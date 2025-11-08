@@ -107,6 +107,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             image_encoder=image_encoder,
         )
         self.register_to_config(force_zeros_for_empty_prompt=force_zeros_for_empty_prompt)
+        self.register_to_config(text_encoder_projection_dim=text_encoder_2.config.projection_dim)
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.default_sample_size = self.unet.config.sample_size
