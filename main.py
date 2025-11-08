@@ -107,16 +107,16 @@ pipeline = DiffMorpherPipelineXL(
 # but is not set automatically when instantiating from components.
 #pipeline.text_encoder_projection_dim = base_pipeline.text_encoder_2.config.projection_dim
 # --- END FIX ---
+
+# 3. Apply your VRAM-saving offload
+pipeline.enable_model_cpu_offload()
+# --- END REPLACEMENT ---
 # 1. SET THE TARGET DEVICE FIRST.
 # This sets pipeline.device = "cuda". It does NOT move all the large models
 # yet because we will immediately override this behavior with offloading.
 # This is the critical step that was missing.
 print("Setting pipeline target device to 'cuda'...")
 pipeline.to("cuda")
-# 3. Apply your VRAM-saving offload
-pipeline.enable_model_cpu_offload()
-# --- END REPLACEMENT ---
-
 # We need to explicitly point model_xl.py to the new lora_utils_xl
 # This is a bit of a hack, but simpler than refactoring model_xl.py
 import model
