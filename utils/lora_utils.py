@@ -144,11 +144,22 @@ def train_lora_xl(
         # --- Save the LoRA ---
         unet = accelerator.unwrap_model(unet)
         lora_state_dict = get_peft_model_state_dict(unet)
-        return lora_state_dict
-        # Use the official diffusers save method
+
+        # --- FIX: Manually save the file ---
+        # We save it here, and model.py will load it.
+        # This avoids the NoneType return bug.
+        accelerator.wait_for_everyone()
+        if accelerator.is_main_process:
+            import safetensors
+            safetensors.torch.save_file(lora_state_dict, save_path)
+            print(f"LoRA state dict saved to {save_path}")
+        # --- END FIX ---
+        
+        # We no longer return the state dict
+        # return lora_state_dict
+        
     finally:
         # This cleanup is still essential
         if "default" in unet.peft_config:
             unet.delete_adapters(["default"])
             print("Cleaned up temporary training adapter.")
-
