@@ -223,47 +223,51 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
     @torch.no_grad()
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
         # --- START FIX ---
-        # Ensure all conditioning tensors are on the same device as the UNet.
-        # This prevents the CPU/CUDA mismatch error inside the UNet's forward pass.
+        # Ensure all input tensors to the UNet are on the correct device.
+        # This is the most robust way to prevent CPU/CUDA device errors.
         device = self.device
+        latent = latent.to(device)  # <--- The new, critical addition
         prompt_embeds = prompt_embeds.to(device)
         pooled_prompt_embeds = pooled_prompt_embeds.to(device)
         # --- END FIX ---
-    
+
         timesteps = reversed(self.scheduler.timesteps)
-        
-        # SDXL Change: Prepare added_cond_kwargs
-        # We assume default resolution 1024x1024, no cropping
+    
         add_time_ids = self._get_add_time_ids(
             (1024, 1024), (0, 0), (1024, 1024), dtype=prompt_embeds.dtype, text_encoder_projection_dim=self.text_encoder_projection_dim
-        ).to(self.device)
-        
+        ).to(device)
+    
         added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
+    
+        # The original code had a bug here, this is the corrected loop
+        for i, t in enumerate(tqdm.tqdm(timesteps, desc="DDIM inversion")):
+            # 1. predict noise
+            eps = self.unet(
+                latent, 
+                t, 
+                encoder_hidden_states=prompt_embeds, 
+                added_cond_kwargs=added_cond_kwargs
+            ).sample
+
+            # 2. get previous timestep
+            prev_timestep = t - self.scheduler.config.num_train_timesteps // self.scheduler.num_inference_steps
         
-        with torch.autocast(device_type='cuda', dtype=torch.float32):
-            for i, t in enumerate(tqdm.tqdm(timesteps, desc="DDIM inversion")):
-                
-                # SDXL Change: U-Net call now includes encoder_hidden_states and added_cond_kwargs
-                eps = self.unet(
-                    latent, 
-                    t, 
-                    encoder_hidden_states=prompt_embeds, 
-                    added_cond_kwargs=added_cond_kwargs
-                ).sample
-
-                alpha_prod_t = self.scheduler.alphas_cumprod[t]
-                alpha_prod_t_prev = (
-                    self.scheduler.alphas_cumprod[timesteps[i - 1]]
-                    if i > 0 else self.scheduler.final_alpha_cumprod
-                )
-
-                mu = alpha_prod_t ** 0.5
-                mu_prev = alpha_prod_t_prev ** 0.5
-                sigma = (1 - alpha_prod_t) ** 0.5
-                sigma_prev = (1 - alpha_prod_t_prev) ** 0.5
-
-                pred_x0 = (latent - sigma_prev * eps) / mu_prev
-                latent = mu * pred_x0 + sigma * eps
+            # 3. compute alphas for current and previous timesteps
+            alpha_prod_t = self.scheduler.alphas_cumprod[t]
+            alpha_prod_t_prev = (
+                self.scheduler.alphas_cumprod[prev_timestep]
+                if prev_timestep >= 0
+                else self.scheduler.final_alpha_cumprod
+            )
+        
+            # 4. compute predicted original sample from predicted noise
+            pred_x0 = (latent - (1 - alpha_prod_t) ** 0.5 * eps) / alpha_prod_t ** 0.5
+        
+            # 5. compute direction pointing to x_t
+            pred_dir = (1 - alpha_prod_t_prev) ** 0.5 * eps
+        
+            # 6. compute x_t-1
+            latent = alpha_prod_t_prev ** 0.5 * pred_x0 + pred_dir
 
         return latent
 
