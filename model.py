@@ -106,8 +106,12 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
+        # Manually inherit the config from one of the components
+        # to ensure all values are present.
+        for k, v in text_encoder_2.config.items():
+            self.register_to_config(**{k: v})
+
         self.register_to_config(force_zeros_for_empty_prompt=force_zeros_for_empty_prompt)
-        self.register_to_config(text_encoder_projection_dim=text_encoder_2.config.projection_dim)
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.default_sample_size = self.unet.config.sample_size
@@ -452,15 +456,42 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         prompt_embeds_1, pooled_embeds_1 = self.get_text_embeddings(
             prompt_1, guidance_scale, neg_prompt, batch_size)
         
-        img_0 = get_img(img_0) # Uses get_img from model_utils_xl (1024)
-        img_1 = get_img(img_1) # Uses get_img from model_utils_xl (1024)
-        
-        if self.use_lora:
-            # Set adapter to fully use lora_1 for the second image inversion
-            self.set_adapters(["lora_1"], adapter_weights=[1.0])
-        img_noise_1 = self.ddim_inversion(
-            self.image2latent(img_1), prompt_embeds_1, pooled_embeds_1)
+        img_0 = get_img(img_0)
+        img_1 = get_img(img_1)
 
+        # --- START FIX ---
+
+        # The embeddings have a batch dim of 2 for CFG.
+        # DDIM Inversion needs only the conditional part (at index 1).
+
+        # 1. Perform DDIM Inversion for the first image
+        if self.use_lora:
+            # Ensure the correct LoRA is active for the inversion
+            self.set_adapters(["lora_0"], adapter_weights=[1.0])
+
+        # Slice the tensors to get only the conditional embeddings
+        cond_prompt_embeds_0 = prompt_embeds_0[1:2]
+        cond_pooled_embeds_0 = pooled_embeds_0[1:2]
+
+        print("Inverting image 0...")
+        img_noise_0 = self.ddim_inversion(
+            self.image2latent(img_0), cond_prompt_embeds_0, cond_pooled_embeds_0)
+
+
+        # 2. Perform DDIM Inversion for the second image (where the original error occurred)
+        if self.use_lora:
+            # Switch to the LoRA for the second image
+            self.set_adapters(["lora_1"], adapter_weights=[1.0])
+
+        # Slice the tensors to get only the conditional embeddings
+        cond_prompt_embeds_1 = prompt_embeds_1[1:2]
+        cond_pooled_embeds_1 = pooled_embeds_1[1:2]
+
+        print("Inverting image 1...")
+        img_noise_1 = self.ddim_inversion(
+            self.image2latent(img_1), cond_prompt_embeds_1, cond_pooled_embeds_1)
+
+        # --- END FIX ---
         print("latents shape: ", img_noise_0.shape)
         
         original_processor = list(self.unet.attn_processors.values())[0]
