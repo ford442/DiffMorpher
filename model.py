@@ -78,7 +78,7 @@ class LoadProcessor():
 
 class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
-def __init__(
+    def __init__(
         self,
         vae: AutoencoderKL,
         text_encoder: CLIPTextModel,
