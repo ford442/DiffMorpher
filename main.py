@@ -102,7 +102,7 @@ pipeline = DiffMorpherPipelineXL(
 # --- FIX: Manually copy the missing config value ---
 # This value is needed by the SDXL pipeline's internal functions
 # but is not set automatically when instantiating from components.
-pipeline.text_encoder_projection_dim = base_pipeline.text_encoder_2.config.projection_dim
+#pipeline.text_encoder_projection_dim = base_pipeline.text_encoder_2.config.projection_dim
 # --- END FIX ---
 
 # 3. Apply your VRAM-saving offload
