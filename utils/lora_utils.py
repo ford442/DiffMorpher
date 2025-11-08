@@ -146,18 +146,18 @@ def train_lora_xl(
         lora_state_dict = get_peft_model_state_dict(unet)
 
         # --- FIX: Manually save the file ---
-        # We save it here, and model.py will load it.
-        # This avoids the NoneType return bug.
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             import safetensors
-            safetensors.torch.save_file(lora_state_dict, save_path)
+            
+            # --- FINAL FIX: Add the 'unet.' prefix to all keys ---
+            prefixed_lora_state_dict = {f"unet.{k}": v for k, v in lora_state_dict.items()}
+            # --- END FINAL FIX ---
+
+            safetensors.torch.save_file(prefixed_lora_state_dict, save_path)
             print(f"LoRA state dict saved to {save_path}")
         # --- END FIX ---
-        
-        # We no longer return the state dict
-        # return lora_state_dict
-        
+
     finally:
         # This cleanup is still essential
         if "default" in unet.peft_config:
