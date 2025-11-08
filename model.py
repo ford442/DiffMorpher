@@ -29,7 +29,7 @@ class StoreProcessor():
 
     def __call__(self, attn, hidden_states, *args, encoder_hidden_states=None, attention_mask=None, **kwargs):
         if encoder_hidden_states is None:
-            self.value_dict[self.name][self.id] = hidden_states.detach()
+            self.value_dict[self.name][self.id] = hidden_states.detach().cpu() # <-- MODIFIED: Move to CPU
             self.id += 1
         res = self.original_processor(attn, hidden_states, *args,
                                       encoder_hidden_states=encoder_hidden_states,
@@ -52,8 +52,9 @@ class LoadProcessor():
     def __call__(self, attn, hidden_states, *args, encoder_hidden_states=None, attention_mask=None, **kwargs):
         if encoder_hidden_states is None:
             if self.id < 50 * self.lamd:
-                map0 = self.img0_dict[self.name][self.id]
-                map1 = self.img1_dict[self.name][self.id]
+                # MODIFIED: Move maps from CPU to the correct GPU device and match dtype just-in-time
+                map0 = self.img0_dict[self.name][self.id].to(hidden_states.device, dtype=hidden_states.dtype)
+                map1 = self.img1_dict[self.name][self.id].to(hidden_states.device, dtype=hidden_states.dtype)
                 cross_map = self.beta * hidden_states + \
                     (1 - self.beta) * ((1 - self.alpha) * map0 + self.alpha * map1)
                 res = self.original_processor(attn, hidden_states, *args,
@@ -417,8 +418,22 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                     image.save(f"{self.output_path}/{i:02d}.png")
                 images.append(image)
 
+        # --- NEW: Cleanup to prevent OOM ---
+        # Clear the large attention map dictionaries
+        self.img0_dict.clear()
+        self.img1_dict.clear()
+        
+        # Force Python's garbage collector to run
+        import gc
+        gc.collect()
+        
+        # Clear the PyTorch CUDA cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        # --- END NEW ---
+            
         return images
-
+        
     def __call__(
         self,
         img_0=None, img_1=None, img_path_0=None, img_path_1=None,
