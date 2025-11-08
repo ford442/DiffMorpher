@@ -315,7 +315,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         
         images = []
         
-        if attn_beta is not None and attn_beta > 0:
+        if attn_beta is not None:
             if self.use_lora:
                 self.set_adapters(["lora_0"], adapter_weights=[1.0])
 
