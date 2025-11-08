@@ -89,7 +89,7 @@ dtype = torch.bfloat16 # Using float16 for T4/L4 VRAM
 base_pipeline = StableDiffusionXLPipeline.from_pretrained(model_path, torch_dtype=dtype)
 
 #scheduler = DDIMScheduler.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", subfolder="scheduler"
-scheduler = DDIMScheduler.from_pretrained(model_path, subfolder="scheduler"
+scheduler = DDIMScheduler.from_pretrained(model_path, subfolder="scheduler")
 
 # 2. Instantiate your custom pipeline class with the components
 pipeline = DiffMorpherPipelineXL(
