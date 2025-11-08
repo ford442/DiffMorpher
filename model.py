@@ -327,7 +327,8 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
                 noise_pred_uncon, noise_pred_con = noise_pred.chunk(2, dim=0)
                 noise_pred = noise_pred_uncon + guidance_scale * (noise_pred_con - noise_pred_uncon)
             
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)
+            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
         return latents
 
     # SDXL Change: New function to get dual embeddings
