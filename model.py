@@ -315,7 +315,7 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         
         for i, t in enumerate(tqdm.tqdm(self.scheduler.timesteps, desc=f"DDIM Sampler, alpha={alpha:.2f}")):
             model_inputs = torch.cat([latents] * 2) if guidance_scale > 1. else latents
-            
+            timestep = t.to(self.device)
             noise_pred = self.unet(
                 model_inputs,
                 t,
