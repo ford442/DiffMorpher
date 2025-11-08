@@ -144,9 +144,15 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
 
     @torch.no_grad()
     def latent2image(self, latents, return_type='np'):
-        # Use the VAE's scaling factor for consistency
+        vae_dtype = self.vae.dtype
+        self.vae.to(dtype=torch.float32)
+
+        # Also cast the latents to float32 to match the VAE
+        latents = latents.to(dtype=torch.float32)
+
         latents = latents / self.vae.config.scaling_factor
         image = self.vae.decode(latents.to(self.vae.dtype))['sample']
+        self.vae.to(dtype=vae_dtype)
 
         if return_type == 'np':
             image = (image / 2 + 0.5).clamp(0, 1)
