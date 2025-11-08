@@ -6,7 +6,7 @@ from PIL import Image
 from argparse import ArgumentParser
 from model import DiffMorpherPipelineXL
 import utils.lora_utils
-from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler, StableDiffusionXLPipeline
+from diffusers import AutoencoderKL, UNet2DConditionModel, DDPMScheduler, StableDiffusionXLPipeline, DDIMScheduler
 from diffusers.schedulers import KarrasDiffusionSchedulers
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 
