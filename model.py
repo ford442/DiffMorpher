@@ -222,6 +222,14 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
     # SDXL Change: ddim_inversion needs to be updated for dual encoders
     @torch.no_grad()
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
+        # --- START FIX ---
+        # Ensure all conditioning tensors are on the same device as the UNet.
+        # This prevents the CPU/CUDA mismatch error inside the UNet's forward pass.
+        device = self.device
+        prompt_embeds = prompt_embeds.to(device)
+        pooled_prompt_embeds = pooled_prompt_embeds.to(device)
+        # --- END FIX ---
+    
         timesteps = reversed(self.scheduler.timesteps)
         
         # SDXL Change: Prepare added_cond_kwargs
