@@ -161,6 +161,8 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
     def ddim_inversion(self, latent, prompt_embeds, pooled_prompt_embeds):
         # Force "cuda" as the target device for computation, bypassing self.device issues.
         device = torch.device("cuda")
+        unet_dtype = self.unet.dtype # DEFINES the variable
+
         latent = latent.to(device=device, dtype=unet_dtype)
         prompt_embeds = prompt_embeds.to(device=device, dtype=unet_dtype)
         pooled_prompt_embeds = pooled_prompt_embeds.to(device=device, dtype=unet_dtype)
