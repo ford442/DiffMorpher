@@ -152,7 +152,10 @@ class DiffMorpherPipelineXL(StableDiffusionXLPipeline):
         # Convert image to float32 to match VAE
         image = image.to(device=device, dtype=torch.float32)
         
-        latents = self.vae.encode(image)['latent_dist'].mean
+        # FIX: Use .sample() instead of .mean for proper latent encoding
+        # Using .mean causes deterministic encoding that loses variance information,
+        # leading to poor color/contrast in the output
+        latents = self.vae.encode(image)['latent_dist'].sample()
         
         # Restore VAE to original dtype
         self.vae.to(dtype=vae_dtype)
