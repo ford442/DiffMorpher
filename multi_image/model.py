@@ -339,7 +339,8 @@ class DiffMorpherPipeline(StableDiffusionPipeline):
             image = torch.from_numpy(image).float() / 127.5 - 1
             image = image.permute(2, 0, 1).unsqueeze(0)
         # input image density range [-1, 1]
-        latents = self.vae.encode(image.to(DEVICE))['latent_dist'].mean
+        # FIX: Use .sample() instead of .mean for proper latent encoding
+        latents = self.vae.encode(image.to(DEVICE))['latent_dist'].sample()
         latents = latents * 0.18215
         return latents
 
